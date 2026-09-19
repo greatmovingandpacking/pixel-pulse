@@ -32,7 +32,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,7 +40,6 @@ import app.pixelpulse.monitor.Formatters
 import app.pixelpulse.monitor.MemoryBreakdownCollector
 import app.pixelpulse.monitor.MemoryDetail
 import app.pixelpulse.monitor.ProcessMemoryRow
-import app.pixelpulse.monitor.UsageAccess
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,7 +48,6 @@ fun MemoryDetailScreen(
     apps: AppDirectory,
     onBack: () -> Unit,
 ) {
-    val context = LocalContext.current
     BackHandler(onBack = onBack)
     var filter by remember { mutableStateOf<ProcessMemoryRow.Kind?>(null) }
     Scaffold(
@@ -60,7 +57,7 @@ fun MemoryDetailScreen(
                     Column {
                         Text("Memory", fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = "${Formatters.bytes(detail.usedBytes)} used · ${Formatters.bytes(detail.availableBytes)} available",
+                            text = "${Formatters.bytes(detail.usedBytes)} used \u00b7 ${Formatters.bytes(detail.availableBytes)} available",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -87,11 +84,9 @@ fun MemoryDetailScreen(
         ) {
             BreakdownCard(detail)
             if (!detail.hasUsageAccess) {
-                PermissionCard(
-                    title = "List apps and services",
-                    body = "Usage access lets Pulse show which apps were active recently. Android still hides exact RAM sizes for other apps on modern Pixels.",
-                    action = "Allow Usage access",
-                    onClick = { context.startActivity(UsageAccess.settingsIntent(context)) },
+                UsageAccessPrompt(
+                    title = "List recently active apps",
+                    extra = "Usage access lets Pulse see which apps were recently active. Android still hides other apps\u2019 exact RAM sizes.",
                 )
             }
             ProcessCard(detail, apps, filter, onFilter = { filter = it })
@@ -115,7 +110,7 @@ private fun BreakdownCard(detail: MemoryDetail) {
         palette[index % palette.size] to (slice.bytes.toFloat() / total)
     }
     DetailCard {
-        Text("What’s using RAM", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("What\u2019s using RAM", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
             "${Formatters.bytes(detail.totalBytes)} total",
             style = MaterialTheme.typography.bodySmall,
@@ -191,7 +186,7 @@ private fun ProcessCard(
                     Column(Modifier.weight(1f)) {
                         Text(row.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            "${MemoryBreakdownCollector.kindLabel(row.kind)} · ${row.detail}",
+                            "${MemoryBreakdownCollector.kindLabel(row.kind)} \u00b7 ${row.detail}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 2,
@@ -199,7 +194,7 @@ private fun ProcessCard(
                         )
                     }
                     Text(
-                        row.pssBytes?.let { Formatters.bytes(it) } ?: "—",
+                        row.pssBytes?.let { Formatters.bytes(it) } ?: "\u2014",
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
