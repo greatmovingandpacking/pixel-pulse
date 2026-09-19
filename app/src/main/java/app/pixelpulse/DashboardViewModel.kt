@@ -105,9 +105,37 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun refreshPermissions() {
-        val granted = UsageAccess.granted(getApplication())
-        if (granted != _networkDetail.value.hasUsageAccess) {
-            _networkDetail.value = _networkDetail.value.copy(hasUsageAccess = granted)
+        viewModelScope.launch {
+            val granted = UsageAccess.granted(getApplication())
+            val now = System.currentTimeMillis()
+            val appRows = if (granted) {
+                withContext(Dispatchers.IO) {
+                    perAppNetwork.collect(now, PerAppNetworkCollector.WINDOW_MS)
+                }
+            } else {
+                emptyList()
+            }
+            val snap = _snapshot.value
+            if (snap != null) {
+                _networkDetail.value = _networkDetail.value.copy(
+                    hasUsageAccess = granted,
+                    apps = appRows,
+                    findings = NetworkDiagnose.analyze(
+                        snap.network,
+                        appRows,
+                        _networkDetail.value.timeline,
+                        granted,
+                    ),
+                )
+            } else {
+                _networkDetail.value = _networkDetail.value.copy(
+                    hasUsageAccess = granted,
+                    apps = appRows,
+                )
+            }
+            _memoryDetail.value = withContext(Dispatchers.IO) {
+                memoryBreakdown.collect(granted)
+            }
         }
     }
 
