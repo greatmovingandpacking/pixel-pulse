@@ -64,6 +64,9 @@ data class CoreInfo(
     val index: Int,
     val usagePercent: Float?,
     val freqMhz: Int?,
+    val online: Boolean = true,
+    val minFreqMhz: Int? = null,
+    val maxFreqMhz: Int? = null,
 )
 
 data class CpuInfo(
@@ -71,6 +74,8 @@ data class CpuInfo(
     val cores: List<CoreInfo>,
     val minFreqMhz: Int?,
     val maxFreqMhz: Int?,
+    val sourceLabel: String = "waiting",
+    val history: List<Float> = emptyList(),
 )
 
 data class NetworkInfo(
