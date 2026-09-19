@@ -15,6 +15,24 @@ class MemoryBreakdownCollector(
     private val appContext = context.applicationContext
 
     fun collect(hasUsageAccess: Boolean): MemoryDetail {
+        return try {
+            collectUnlocked(hasUsageAccess)
+        } catch (_: Throwable) {
+            MemoryDetail(
+                hasUsageAccess = hasUsageAccess,
+                totalBytes = 0,
+                availableBytes = 0,
+                usedBytes = 0,
+                swapUsedBytes = 0,
+                swapTotalBytes = 0,
+                slices = emptyList(),
+                processes = emptyList(),
+                note = "Could not read the memory breakdown this pass.",
+            )
+        }
+    }
+
+    private fun collectUnlocked(hasUsageAccess: Boolean): MemoryDetail {
         val kb = readMemInfo()
         val slices = MemInfoParser.slices(kb)
         val total = (kb["MemTotal"] ?: 0L) * 1024L
@@ -59,7 +77,7 @@ class MemoryBreakdownCollector(
     private fun addRunningProcesses(into: MutableMap<String, ProcessMemoryRow>) {
         val am = appContext.getSystemService(ActivityManager::class.java) ?: return
         val running = try {
-            am.runningAppProcesses.orEmpty()
+            am.runningAppProcesses.orEmpty().take(80)
         } catch (_: Exception) {
             emptyList()
         }
@@ -123,19 +141,21 @@ class MemoryBreakdownCollector(
             usm.queryEvents(start, end)
         } catch (_: Exception) {
             return
-        }
+        } ?: return
         val last = linkedMapOf<String, Pair<Long, Int>>()
         val event = UsageEvents.Event()
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event)
-            val pkg = event.packageName ?: continue
-            when (event.eventType) {
-                UsageEvents.Event.ACTIVITY_RESUMED,
-                UsageEvents.Event.FOREGROUND_SERVICE_START,
-                UsageEvents.Event.ACTIVITY_PAUSED,
-                UsageEvents.Event.FOREGROUND_SERVICE_STOP,
-                -> last[pkg] = event.timeStamp to event.eventType
+        var seen = 0
+        try {
+            while (events.hasNextEvent() && seen < MAX_USAGE_EVENTS) {
+                events.getNextEvent(event)
+                seen++
+                val pkg = event.packageName ?: continue
+                if (isTrackedUsageEvent(event.eventType)) {
+                    last[pkg] = event.timeStamp to event.eventType
+                }
             }
+        } catch (_: Throwable) {
+            return
         }
         last.forEach { (pkg, pair) ->
             if (into.values.any { it.packageName == pkg }) return@forEach
@@ -185,6 +205,17 @@ class MemoryBreakdownCollector(
     }
 
     companion object {
+        private const val MAX_USAGE_EVENTS = 800
+
+        fun isTrackedUsageEvent(eventType: Int): Boolean = when (eventType) {
+            UsageEvents.Event.ACTIVITY_RESUMED,
+            UsageEvents.Event.FOREGROUND_SERVICE_START,
+            UsageEvents.Event.ACTIVITY_PAUSED,
+            UsageEvents.Event.FOREGROUND_SERVICE_STOP,
+            -> true
+            else -> false
+        }
+
         fun importanceKind(importance: Int): ProcessMemoryRow.Kind = when {
             importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ->
                 ProcessMemoryRow.Kind.APP
