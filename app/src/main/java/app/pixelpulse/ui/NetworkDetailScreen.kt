@@ -39,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,7 +49,6 @@ import app.pixelpulse.monitor.Formatters
 import app.pixelpulse.monitor.NetworkDetail
 import app.pixelpulse.monitor.NetworkFinding
 import app.pixelpulse.monitor.NetworkInfo
-import app.pixelpulse.monitor.UsageAccess
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,7 +58,6 @@ fun NetworkDetailScreen(
     apps: AppDirectory,
     onBack: () -> Unit,
 ) {
-    val context = LocalContext.current
     BackHandler(onBack = onBack)
     Scaffold(
         topBar = {
@@ -69,7 +66,7 @@ fun NetworkDetailScreen(
                     Column {
                         Text("Network", fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = snapshot?.transportLabel ?: "Reading…",
+                            text = snapshot?.transportLabel ?: "Reading\u2026",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -98,204 +95,13 @@ fun NetworkDetailScreen(
             DiagnosisCard(detail.findings)
             HistoryCard(detail)
             if (!detail.hasUsageAccess) {
-                PermissionCard(
+                UsageAccessPrompt(
                     title = "See which apps are using data",
-                    body = "Android keeps per-app network history behind Usage access. Pulse never leaves the device.",
-                    action = "Allow Usage access",
-                    onClick = { context.startActivity(UsageAccess.settingsIntent(context)) },
+                    extra = "Pulse never leaves the device. Usage access is only used to read per-app network history on this phone.",
                 )
             }
             AppUsageCard(detail.apps, apps)
             Spacer(Modifier.height(16.dp))
-        }
-    }
-}
-
-@Composable
-private fun LiveRatesCard(network: NetworkInfo) {
-    DetailCard {
-        Text("Right now", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column {
-                Text("Download", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(Formatters.rateBytesPerSec(network.rxBytesPerSec), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("Upload", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(Formatters.rateBytesPerSec(network.txBytesPerSec), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        val bits = buildList {
-            add(network.transportLabel)
-            if (network.validated) add("validated")
-            network.wifiStandardLabel?.let { add(it) }
-            network.wifiRssi?.let { add("$it dBm") }
-            network.wifiFrequencyMhz?.let { add("$it MHz") }
-            network.wifiLinkMbps?.let { add("link $it Mbps") }
-            network.cellularLevel?.let { add("signal $it/4") }
-            if (network.metered) add("metered")
-            if (network.roaming) add("roaming")
-        }
-        Text(bits.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun DiagnosisCard(findings: List<NetworkFinding>) {
-    DetailCard {
-        Text("Diagnosis", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(10.dp))
-        findings.forEachIndexed { index, finding ->
-            if (index > 0) Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.Top) {
-                Icon(
-                    imageVector = when (finding.severity) {
-                        NetworkFinding.Severity.OK -> Icons.Outlined.CheckCircle
-                        NetworkFinding.Severity.INFO -> Icons.Outlined.Info
-                        NetworkFinding.Severity.WARN -> Icons.Outlined.WarningAmber
-                        NetworkFinding.Severity.BAD -> Icons.Outlined.ErrorOutline
-                    },
-                    contentDescription = null,
-                    tint = when (finding.severity) {
-                        NetworkFinding.Severity.OK -> MaterialTheme.colorScheme.primary
-                        NetworkFinding.Severity.INFO -> MaterialTheme.colorScheme.secondary
-                        NetworkFinding.Severity.WARN -> MaterialTheme.colorScheme.tertiary
-                        NetworkFinding.Severity.BAD -> MaterialTheme.colorScheme.error
-                    },
-                )
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text(finding.title, fontWeight = FontWeight.SemiBold)
-                    Text(finding.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun HistoryCard(detail: NetworkDetail) {
-    DetailCard {
-        Text("Last 5 minutes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text(
-            "Green is download, teal is upload. Updates every second while Pulse is open.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(12.dp))
-        RateTimeline(detail.timeline)
-        val down = detail.timeline.sumOf { it.rxBytesPerSec }
-        val up = detail.timeline.sumOf { it.txBytesPerSec }
-        if (detail.timeline.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "≈ ${Formatters.bytes(down)} down · ${Formatters.bytes(up)} up over this session window",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun AppUsageCard(apps: List<AppNetworkUsage>, directory: AppDirectory) {
-    DetailCard {
-        Text("Apps using the network", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text(
-            "Totals are the last 5 minutes. Rates are live.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(12.dp))
-        if (apps.isEmpty()) {
-            Text("No per-app samples yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            apps.take(24).forEachIndexed { index, row ->
-                if (index > 0) Spacer(Modifier.height(12.dp))
-                AppNetworkRow(row, directory.icon(row.app.packageName))
-            }
-        }
-    }
-}
-
-@Composable
-private fun AppNetworkRow(row: AppNetworkUsage, icon: Drawable?) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        AppGlyph(icon, row.app.label)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(row.app.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val share = buildList {
-                add("${Formatters.bytes(row.totalBytes)} / 5 min")
-                if (row.wifiBytes > 0) add("Wi‑Fi ${Formatters.bytes(row.wifiBytes)}")
-                if (row.mobileBytes > 0) add("Cell ${Formatters.bytes(row.mobileBytes)}")
-                if (row.foregroundBytes > 0 && row.backgroundBytes > 0) {
-                    val fg = row.foregroundBytes * 100 / row.totalBytes.coerceAtLeast(1)
-                    add("$fg% foreground")
-                }
-            }
-            Text(share.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (row.history.size >= 2) {
-                Spacer(Modifier.height(6.dp))
-                RateTimeline(row.history, modifier = Modifier.height(36.dp))
-            }
-        }
-        Spacer(Modifier.width(8.dp))
-        Column(horizontalAlignment = Alignment.End) {
-            Text("↓ ${Formatters.rateBytesPerSec(row.rxBytesPerSec)}", style = MaterialTheme.typography.labelLarge)
-            Text("↑ ${Formatters.rateBytesPerSec(row.txBytesPerSec)}", style = MaterialTheme.typography.labelLarge)
-        }
-    }
-}
-
-@Composable
-internal fun PermissionCard(title: String, body: String, action: String, onClick: () -> Unit) {
-    DetailCard {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(6.dp))
-        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(12.dp))
-        Button(onClick = onClick) { Text(action) }
-    }
-}
-
-@Composable
-internal fun DetailCard(content: @Composable () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        tonalElevation = 2.dp,
-    ) {
-        Column(Modifier.padding(18.dp)) { content() }
-    }
-}
-
-@Composable
-internal fun AppGlyph(icon: Drawable?, label: String) {
-    if (icon != null) {
-        Image(
-            bitmap = icon.toBitmap(96, 96).asImageBitmap(),
-            contentDescription = null,
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(12.dp)),
-        )
-    } else {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = label.firstOrNull()?.uppercase() ?: "?",
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                fontWeight = FontWeight.Bold,
-            )
         }
     }
 }
