@@ -22,3 +22,4 @@ out/
 .kotlin/
 app/release/
 keystore.properties
+.herenow/

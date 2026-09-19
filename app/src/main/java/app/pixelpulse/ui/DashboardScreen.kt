@@ -3,6 +3,7 @@ package app.pixelpulse.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.outlined.DeviceThermostat
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import app.pixelpulse.BuildConfig
 import app.pixelpulse.monitor.BatteryInfo
 import app.pixelpulse.monitor.BatteryStatus
@@ -61,7 +64,11 @@ import app.pixelpulse.monitor.ThermalInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(snapshot: ResourceSnapshot?) {
+fun DashboardScreen(
+    snapshot: ResourceSnapshot?,
+    onNetworkClick: () -> Unit = {},
+    onMemoryClick: () -> Unit = {},
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -111,9 +118,9 @@ fun DashboardScreen(snapshot: ResourceSnapshot?) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Box(modifier = Modifier.weight(1f)) { CpuCard(snapshot.cpu) }
-                Box(modifier = Modifier.weight(1f)) { MemoryCard(snapshot.memory) }
+                Box(modifier = Modifier.weight(1f)) { MemoryCard(snapshot.memory, onMemoryClick) }
             }
-            NetworkCard(snapshot.network)
+            NetworkCard(snapshot.network, onNetworkClick)
             StorageCard(snapshot.storage)
             FooterRow(snapshot.thermal)
             Spacer(Modifier.height(12.dp))
@@ -124,10 +131,13 @@ fun DashboardScreen(snapshot: ResourceSnapshot?) {
 @Composable
 private fun DashboardCard(
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         tonalElevation = 2.dp,
@@ -247,28 +257,47 @@ private fun BatteryCard(battery: BatteryInfo) {
 
 @Composable
 private fun CpuCard(cpu: CpuInfo) {
+    val shown = cpu.usagePercent ?: 0f
+    val animated by animateFloatAsState(targetValue = shown, animationSpec = tween(450), label = "cpu")
     DashboardCard {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             CardHeader(icon = { Icon(Icons.Outlined.Speed, null) }, title = "CPU")
-            Text(
-                text = Formatters.percent(cpu.usagePercent),
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-            )
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = if (cpu.usagePercent == null) "\u2014" else "${animated.roundToInt()}%",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = when (cpu.sourceLabel) {
+                        "waiting" -> "sampling\u2026"
+                        "clock speed" -> "clock (not busy %)"
+                        else -> "live \u00b7 ${cpu.sourceLabel}"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
             LinearProgressIndicator(
-                progress = { (cpu.usagePercent ?: 0f) / 100f },
+                progress = { if (cpu.usagePercent == null) 0f else animated / 100f },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp),
             )
+            if (cpu.history.size >= 2) {
+                CpuSparkline(cpu.history)
+            }
             CoreBars(cpu)
             val freq = when {
                 cpu.minFreqMhz != null && cpu.maxFreqMhz != null && cpu.minFreqMhz != cpu.maxFreqMhz ->
-                    "${Formatters.frequency(cpu.minFreqMhz)}–${Formatters.frequency(cpu.maxFreqMhz)}"
+                    "${Formatters.frequency(cpu.minFreqMhz)}\u2013${Formatters.frequency(cpu.maxFreqMhz)}"
                 else -> Formatters.frequency(cpu.maxFreqMhz ?: cpu.minFreqMhz)
             }
+            val online = cpu.cores.count { it.online }
             Text(
-                text = "${cpu.cores.size} cores · $freq",
+                text = "$online/${cpu.cores.size} cores online \u00b7 $freq",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -292,28 +321,34 @@ private fun CoreBars(cpu: CpuInfo) {
         cores.forEachIndexed { index, core ->
             val x = index * (barWidth + gap)
             drawRoundRect(
-                color = track,
+                color = track.copy(alpha = if (core.online) 1f else 0.35f),
                 topLeft = Offset(x, 0f),
                 size = Size(barWidth, size.height),
                 cornerRadius = CornerRadius(4.dp.toPx()),
             )
             val usage = (core.usagePercent ?: 0f) / 100f
             val h = size.height * usage
-            drawRoundRect(
-                color = barColor,
-                topLeft = Offset(x, size.height - h),
-                size = Size(barWidth, h),
-                cornerRadius = CornerRadius(4.dp.toPx()),
-            )
+            if (h > 0f && core.online) {
+                drawRoundRect(
+                    color = barColor,
+                    topLeft = Offset(x, size.height - h),
+                    size = Size(barWidth, h),
+                    cornerRadius = CornerRadius(4.dp.toPx()),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun MemoryCard(memory: MemoryStats) {
-    DashboardCard {
+private fun MemoryCard(memory: MemoryStats, onClick: () -> Unit) {
+    DashboardCard(onClick = onClick) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            CardHeader(icon = { Icon(Icons.Outlined.Memory, null) }, title = "Memory")
+            CardHeader(
+                icon = { Icon(Icons.Outlined.Memory, null) },
+                title = "Memory",
+                trailingIcon = true,
+            )
             Text(
                 text = Formatters.percent(memory.usedPercent),
                 style = MaterialTheme.typography.headlineMedium,
@@ -331,7 +366,7 @@ private fun MemoryCard(memory: MemoryStats) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                text = if (memory.lowMemory) "Low memory" else "${Formatters.bytes(memory.availBytes)} free",
+                text = if (memory.lowMemory) "Low memory" else "${Formatters.bytes(memory.availBytes)} free \u00b7 apps",
                 style = MaterialTheme.typography.labelMedium,
                 color = if (memory.lowMemory) {
                     MaterialTheme.colorScheme.error
@@ -344,13 +379,14 @@ private fun MemoryCard(memory: MemoryStats) {
 }
 
 @Composable
-private fun NetworkCard(network: NetworkInfo) {
-    DashboardCard {
+private fun NetworkCard(network: NetworkInfo, onClick: () -> Unit) {
+    DashboardCard(onClick = onClick) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             CardHeader(
                 icon = { Icon(Icons.Outlined.Wifi, null) },
                 title = "Network",
                 trailing = network.transportLabel,
+                trailingIcon = true,
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
@@ -379,7 +415,7 @@ private fun NetworkCard(network: NetworkInfo) {
                 }
             }
             Text(
-                text = extras.joinToString(" · "),
+                text = extras.joinToString(" \u00b7 ") + " \u00b7 tap for apps & history",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -411,7 +447,7 @@ private fun StorageCard(storage: StorageInfo) {
                     .height(8.dp),
             )
             Text(
-                text = "${Formatters.bytes(storage.freeBytes)} free · ${Formatters.percent(storage.usedPercent)} used",
+                text = "${Formatters.bytes(storage.freeBytes)} free \u00b7 ${Formatters.percent(storage.usedPercent)} used",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -439,7 +475,7 @@ private fun FooterRow(thermal: ThermalInfo) {
                 )
             }
             Text(
-                text = "v${BuildConfig.VERSION_NAME} · on-device only",
+                text = "v${BuildConfig.VERSION_NAME} \u00b7 on-device only",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
@@ -453,17 +489,25 @@ private fun CardHeader(
     icon: @Composable () -> Unit,
     title: String,
     trailing: String? = null,
+    trailingIcon: Boolean = false,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) { icon() }
         Spacer(Modifier.width(8.dp))
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.weight(1f))
         if (trailing != null) {
-            Spacer(Modifier.weight(1f))
             Text(
                 trailing,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (trailingIcon) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

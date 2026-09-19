@@ -7,18 +7,20 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.TrafficStats
+import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
+import android.net.wifi.ScanResult
 import android.os.BatteryManager
+import android.telephony.TelephonyManager
 import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
-import java.io.File
 
 class ResourceCollector(private val context: Context) {
-    private var lastCpu: Map<String, CpuMath.Sample> = emptyMap()
+    private val cpuSampler = CpuSampler()
     private var lastRx: Long = TrafficStats.getTotalRxBytes()
     private var lastTx: Long = TrafficStats.getTotalTxBytes()
     private var lastNetAt: Long = SystemClock.elapsedRealtime()
@@ -148,67 +150,7 @@ class ResourceCollector(private val context: Context) {
         )
     }
 
-    private fun cpuInfo(): CpuInfo {
-        val samples = readProcStat()
-        val usages = linkedMapOf<String, Float?>()
-        if (samples.isNotEmpty() && lastCpu.isNotEmpty()) {
-            for ((name, current) in samples) {
-                val previous = lastCpu[name] ?: continue
-                usages[name] = CpuMath.usagePercent(previous, current)
-            }
-        }
-        if (samples.isNotEmpty()) lastCpu = samples
-
-        val coreCount = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        val cores = (0 until coreCount).map { index ->
-            val usage = usages["cpu$index"] ?: usages["cpu$index".trim()]
-            CoreInfo(
-                index = index,
-                usagePercent = usage,
-                freqMhz = readCoreFreqMhz(index),
-            )
-        }
-        val overall = usages["cpu"] ?: cores.mapNotNull { it.usagePercent }.takeIf { it.isNotEmpty() }?.average()?.toFloat()
-        val freqs = cores.mapNotNull { it.freqMhz }
-        return CpuInfo(
-            usagePercent = overall,
-            cores = cores,
-            minFreqMhz = freqs.minOrNull(),
-            maxFreqMhz = freqs.maxOrNull(),
-        )
-    }
-
-    private fun readProcStat(): Map<String, CpuMath.Sample> {
-        return try {
-            File("/proc/stat").useLines { lines ->
-                lines
-                    .takeWhile { it.startsWith("cpu") }
-                    .mapNotNull { line ->
-                        val name = line.trim().split(Regex("\\s+")).firstOrNull() ?: return@mapNotNull null
-                        CpuMath.parseProcStatLine(line)?.let { name to it }
-                    }
-                    .toMap()
-            }
-        } catch (_: Exception) {
-            emptyMap()
-        }
-    }
-
-    private fun readCoreFreqMhz(index: Int): Int? {
-        val paths = listOf(
-            "/sys/devices/system/cpu/cpu$index/cpufreq/scaling_cur_freq",
-            "/sys/devices/system/cpu/cpu$index/cpufreq/cpuinfo_cur_freq",
-        )
-        for (path in paths) {
-            try {
-                val khz = File(path).takeIf { it.canRead() }?.readText()?.trim()?.toLongOrNull() ?: continue
-                if (khz > 0) return (khz / 1000L).toInt()
-            } catch (_: Exception) {
-                // try next path
-            }
-        }
-        return null
-    }
+    private fun cpuInfo(): CpuInfo = cpuSampler.sample()
 
     private fun networkInfo(): NetworkInfo {
         val cm = context.getSystemService(ConnectivityManager::class.java)
@@ -223,6 +165,12 @@ class ResourceCollector(private val context: Context) {
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_USB)) transports += "USB"
         }
         val connected = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        val validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        val captive = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true
+        val partial = caps?.hasCapability(24) == true // NET_CAPABILITY_PARTIAL_CONNECTIVITY
+        val metered = caps != null && !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        val roaming = caps != null && !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING)
+        val wifiInfo = caps?.transportInfo as? WifiInfo
         val now = SystemClock.elapsedRealtime()
         val rx = TrafficStats.getTotalRxBytes()
         val tx = TrafficStats.getTotalTxBytes()
@@ -241,11 +189,19 @@ class ResourceCollector(private val context: Context) {
         lastTx = tx
         lastNetAt = now
 
-        val wifiMbps = if (transports.contains("Wi-Fi")) {
+        val wifiMbps = wifiInfo?.linkSpeed?.takeIf { it > 0 } ?: if (transports.contains("Wi-Fi")) {
             try {
                 @Suppress("DEPRECATION")
-                val info = context.getSystemService(WifiManager::class.java).connectionInfo
-                info?.linkSpeed?.takeIf { it > 0 }
+                context.getSystemService(WifiManager::class.java).connectionInfo?.linkSpeed?.takeIf { it > 0 }
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+        val cellularLevel = if (transports.contains("Cellular")) {
+            try {
+                context.getSystemService(TelephonyManager::class.java).signalStrength?.level
             } catch (_: Exception) {
                 null
             }
@@ -267,6 +223,15 @@ class ResourceCollector(private val context: Context) {
             downlinkCapKbps = caps?.linkDownstreamBandwidthKbps?.takeIf { it > 0 },
             uplinkCapKbps = caps?.linkUpstreamBandwidthKbps?.takeIf { it > 0 },
             wifiLinkMbps = wifiMbps,
+            validated = validated,
+            captivePortal = captive,
+            partialConnectivity = partial,
+            metered = metered,
+            roaming = roaming,
+            wifiRssi = wifiInfo?.rssi?.takeIf { it in -126..0 },
+            wifiFrequencyMhz = wifiInfo?.frequency?.takeIf { it > 0 },
+            wifiStandardLabel = wifiStandardLabel(wifiInfo),
+            cellularLevel = cellularLevel,
         )
     }
 
@@ -293,6 +258,19 @@ class ResourceCollector(private val context: Context) {
             PowerManager.THERMAL_STATUS_NONE
         }
         return ThermalInfo(status = status, label = ThermalLabels.label(status))
+    }
+
+    private fun wifiStandardLabel(info: WifiInfo?): String? {
+        if (info == null) return null
+        return when (info.wifiStandard) {
+            ScanResult.WIFI_STANDARD_LEGACY -> "Legacy Wi‑Fi"
+            ScanResult.WIFI_STANDARD_11N -> "Wi‑Fi 4"
+            ScanResult.WIFI_STANDARD_11AC -> "Wi‑Fi 5"
+            ScanResult.WIFI_STANDARD_11AX -> "Wi‑Fi 6"
+            ScanResult.WIFI_STANDARD_11AD -> "WiGig"
+            ScanResult.WIFI_STANDARD_11BE -> "Wi‑Fi 7"
+            else -> null
+        }
     }
 
     companion object {
