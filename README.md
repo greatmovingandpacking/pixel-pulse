@@ -7,7 +7,7 @@ The app stays on-device. It does not request internet access or accounts. Per-ap
 ## Download and sideload
 
 **Install page:** https://jolly-bugle-ntfv.here.now/  
-**Direct APK:** https://jolly-bugle-ntfv.here.now/pixel-pulse-1.1.1.apk
+**Direct APK:** https://jolly-bugle-ntfv.here.now/pixel-pulse-1.1.2.apk
 
 That download is an anonymous host and expires about 24 hours after publish unless you claim it here: https://here.now/c/Z_cbVYYPnGhCqA6C
 
@@ -38,10 +38,18 @@ Charge speed labels: Trickle, Standard, Fast charge, Super fast, plus Wireless w
 
 - `ACCESS_NETWORK_STATE` — whether you are on Wi-Fi or cellular
 - `ACCESS_WIFI_STATE` — Wi-Fi link speed
-- `PACKAGE_USAGE_STATS` — optional. Per-app network history and recently active apps/services. You grant this in Settings.
+- `PACKAGE_USAGE_STATS` — optional. Per-app network history and recently active apps/services.
 - `QUERY_ALL_PACKAGES` — resolve app names and icons for those lists
 
 No location permission, so the Wi-Fi SSID is not shown.
+
+Usage access is **not** a normal in-app permission prompt. Android will never show “Allow / Deny” for it. Because this APK is sideloaded from Chrome, Pixel also locks it behind **Restricted settings**:
+
+1. In Pulse, tap **Open Usage access**. If Settings says Restricted setting, that is expected.
+2. Tap **Allow restricted settings** (or Settings → Apps → Pulse → ⋮ → Allow restricted settings).
+3. Return to **Usage access** and turn **Pulse** on.
+
+Pulse never sends this data off the device.
 
 Android hides other apps' exact RAM sizes from third-party apps. Pulse shows the system-level split (apps, cache, kernel, free) and lists processes it is allowed to see.
 
