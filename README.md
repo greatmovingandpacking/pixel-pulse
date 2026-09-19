@@ -7,7 +7,7 @@ The app stays on-device. It does not request internet access or accounts. Per-ap
 ## Download and sideload
 
 **Install page:** https://jolly-bugle-ntfv.here.now/  
-**Direct APK:** https://jolly-bugle-ntfv.here.now/pixel-pulse-1.1.2.apk
+**Direct APK:** https://jolly-bugle-ntfv.here.now/pixel-pulse-1.1.3.apk
 
 That download is an anonymous host and expires about 24 hours after publish unless you claim it here: https://here.now/c/Z_cbVYYPnGhCqA6C
 
@@ -66,6 +66,7 @@ The signed APK is written to `app/build/outputs/apk/release/`.
 
 ## Notes
 
+- v1.1.3 keeps Pulse from crashing after Usage access is granted (per-app collectors and app icons).
 - v1 samples only while Pulse is in the foreground. That keeps the monitor from becoming a battery drain.
 - Some fields are best-effort. Android does not let unprivileged apps read every kernel counter on every build.
 - The release keystore in `app/keystore/` is for this personal sideload app so updates keep the same signature.

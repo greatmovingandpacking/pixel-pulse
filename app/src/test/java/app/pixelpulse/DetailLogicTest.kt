@@ -1,5 +1,6 @@
 package app.pixelpulse
 
+import android.app.usage.UsageEvents
 import app.pixelpulse.monitor.AppIdentity
 import app.pixelpulse.monitor.AppNetworkUsage
 import app.pixelpulse.monitor.MemInfoParser
@@ -93,5 +94,11 @@ class DetailLogicTest {
         assertEquals(ProcessMemoryRow.Kind.CACHED, MemoryBreakdownCollector.importanceKind(400))
         assertEquals("Foreground service", MemoryBreakdownCollector.importanceLabel(125))
         assertEquals("Youtube", MemoryBreakdownCollector.displayName("com.google.android.youtube"))
+    }
+
+    @Test
+    fun usageEventFilterKeepsResumeAndIgnoresNoise() {
+        assertTrue(MemoryBreakdownCollector.isTrackedUsageEvent(UsageEvents.Event.ACTIVITY_RESUMED))
+        assertTrue(!MemoryBreakdownCollector.isTrackedUsageEvent(UsageEvents.Event.NONE))
     }
 }
