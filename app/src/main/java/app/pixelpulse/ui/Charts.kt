@@ -54,6 +54,33 @@ fun RateTimeline(
 }
 
 @Composable
+fun CpuSparkline(
+    values: List<Float>,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+) {
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(28.dp)
+            .then(modifier),
+    ) {
+        drawRoundRect(color = track.copy(alpha = 0.35f))
+        if (values.size < 2) return@Canvas
+        val max = values.max().coerceAtLeast(1f)
+        val stepX = size.width / (values.size - 1).coerceAtLeast(1)
+        val path = Path()
+        values.forEachIndexed { index, value ->
+            val x = index * stepX
+            val y = size.height - (value / max) * (size.height * 0.9f)
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, color = color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+    }
+}
+
+@Composable
 fun StackedMemoryBar(
     fractions: List<Pair<Color, Float>>,
     modifier: Modifier = Modifier,
