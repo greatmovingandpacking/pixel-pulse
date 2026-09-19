@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import app.pixelpulse.BuildConfig
 import app.pixelpulse.monitor.BatteryInfo
 import app.pixelpulse.monitor.BatteryStatus
@@ -256,28 +257,47 @@ private fun BatteryCard(battery: BatteryInfo) {
 
 @Composable
 private fun CpuCard(cpu: CpuInfo) {
+    val shown = cpu.usagePercent ?: 0f
+    val animated by animateFloatAsState(targetValue = shown, animationSpec = tween(450), label = "cpu")
     DashboardCard {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             CardHeader(icon = { Icon(Icons.Outlined.Speed, null) }, title = "CPU")
-            Text(
-                text = Formatters.percent(cpu.usagePercent),
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-            )
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = if (cpu.usagePercent == null) "\u2014" else "${animated.roundToInt()}%",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = when (cpu.sourceLabel) {
+                        "waiting" -> "sampling\u2026"
+                        "clock speed" -> "clock (not busy %)"
+                        else -> "live \u00b7 ${cpu.sourceLabel}"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
             LinearProgressIndicator(
-                progress = { (cpu.usagePercent ?: 0f) / 100f },
+                progress = { if (cpu.usagePercent == null) 0f else animated / 100f },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp),
             )
+            if (cpu.history.size >= 2) {
+                CpuSparkline(cpu.history)
+            }
             CoreBars(cpu)
             val freq = when {
                 cpu.minFreqMhz != null && cpu.maxFreqMhz != null && cpu.minFreqMhz != cpu.maxFreqMhz ->
-                    "${Formatters.frequency(cpu.minFreqMhz)}–${Formatters.frequency(cpu.maxFreqMhz)}"
+                    "${Formatters.frequency(cpu.minFreqMhz)}\u2013${Formatters.frequency(cpu.maxFreqMhz)}"
                 else -> Formatters.frequency(cpu.maxFreqMhz ?: cpu.minFreqMhz)
             }
+            val online = cpu.cores.count { it.online }
             Text(
-                text = "${cpu.cores.size} cores · $freq",
+                text = "$online/${cpu.cores.size} cores online \u00b7 $freq",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -301,19 +321,21 @@ private fun CoreBars(cpu: CpuInfo) {
         cores.forEachIndexed { index, core ->
             val x = index * (barWidth + gap)
             drawRoundRect(
-                color = track,
+                color = track.copy(alpha = if (core.online) 1f else 0.35f),
                 topLeft = Offset(x, 0f),
                 size = Size(barWidth, size.height),
                 cornerRadius = CornerRadius(4.dp.toPx()),
             )
             val usage = (core.usagePercent ?: 0f) / 100f
             val h = size.height * usage
-            drawRoundRect(
-                color = barColor,
-                topLeft = Offset(x, size.height - h),
-                size = Size(barWidth, h),
-                cornerRadius = CornerRadius(4.dp.toPx()),
-            )
+            if (h > 0f && core.online) {
+                drawRoundRect(
+                    color = barColor,
+                    topLeft = Offset(x, size.height - h),
+                    size = Size(barWidth, h),
+                    cornerRadius = CornerRadius(4.dp.toPx()),
+                )
+            }
         }
     }
 }
@@ -344,7 +366,7 @@ private fun MemoryCard(memory: MemoryStats, onClick: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                text = if (memory.lowMemory) "Low memory" else "${Formatters.bytes(memory.availBytes)} free · apps",
+                text = if (memory.lowMemory) "Low memory" else "${Formatters.bytes(memory.availBytes)} free \u00b7 apps",
                 style = MaterialTheme.typography.labelMedium,
                 color = if (memory.lowMemory) {
                     MaterialTheme.colorScheme.error
@@ -393,7 +415,7 @@ private fun NetworkCard(network: NetworkInfo, onClick: () -> Unit) {
                 }
             }
             Text(
-                text = extras.joinToString(" · ") + " · tap for apps & history",
+                text = extras.joinToString(" \u00b7 ") + " \u00b7 tap for apps & history",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -425,7 +447,7 @@ private fun StorageCard(storage: StorageInfo) {
                     .height(8.dp),
             )
             Text(
-                text = "${Formatters.bytes(storage.freeBytes)} free · ${Formatters.percent(storage.usedPercent)} used",
+                text = "${Formatters.bytes(storage.freeBytes)} free \u00b7 ${Formatters.percent(storage.usedPercent)} used",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -453,7 +475,7 @@ private fun FooterRow(thermal: ThermalInfo) {
                 )
             }
             Text(
-                text = "v${BuildConfig.VERSION_NAME} · on-device only",
+                text = "v${BuildConfig.VERSION_NAME} \u00b7 on-device only",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
