@@ -1,5 +1,6 @@
 package app.pixelpulse.ui
 
+import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -35,9 +36,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,7 +69,7 @@ fun NetworkDetailScreen(
                     Column {
                         Text("Network", fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = snapshot?.transportLabel ?: "Reading\u2026",
+                            text = snapshot?.transportLabel ?: "Reading…",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -133,7 +136,7 @@ private fun LiveRatesCard(network: NetworkInfo) {
             if (network.metered) add("metered")
             if (network.roaming) add("roaming")
         }
-        Text(bits.joinToString(" \u00b7 "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(bits.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -186,7 +189,7 @@ private fun HistoryCard(detail: NetworkDetail) {
         if (detail.timeline.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text(
-                "\u2248 ${Formatters.bytes(down)} down \u00b7 ${Formatters.bytes(up)} up over this session window",
+                "≈ ${Formatters.bytes(down)} down · ${Formatters.bytes(up)} up over this session window",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -231,7 +234,7 @@ private fun AppNetworkRow(row: AppNetworkUsage, icon: Drawable?) {
                     add("$fg% foreground")
                 }
             }
-            Text(share.joinToString(" \u00b7 "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(share.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (row.history.size >= 2) {
                 Spacer(Modifier.height(6.dp))
                 RateTimeline(row.history, modifier = Modifier.height(36.dp))
@@ -270,9 +273,10 @@ internal fun DetailCard(content: @Composable () -> Unit) {
 
 @Composable
 internal fun AppGlyph(icon: Drawable?, label: String) {
-    if (icon != null) {
+    val bitmap = remember(icon) { icon.toSafeImageBitmap() }
+    if (bitmap != null) {
         Image(
-            bitmap = icon.toBitmap(96, 96).asImageBitmap(),
+            bitmap = bitmap,
             contentDescription = null,
             modifier = Modifier
                 .size(40.dp)
@@ -292,5 +296,15 @@ internal fun AppGlyph(icon: Drawable?, label: String) {
                 fontWeight = FontWeight.Bold,
             )
         }
+    }
+}
+
+internal fun Drawable?.toSafeImageBitmap(size: Int = 96): ImageBitmap? {
+    if (this == null) return null
+    return try {
+        val src = constantState?.newDrawable()?.mutate() ?: mutate()
+        src.toBitmap(size, size, Bitmap.Config.ARGB_8888).asImageBitmap()
+    } catch (_: Throwable) {
+        null
     }
 }
