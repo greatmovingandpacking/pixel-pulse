@@ -170,8 +170,84 @@ object CpuMath {
         if (parts.size < 5 || !parts[0].startsWith("cpu")) return null
         val values = parts.drop(1).mapNotNull { it.toLongOrNull() }
         if (values.size < 4) return null
-        val idle = values[3] + values.getOrElse(4) { 0L }
-        return Sample(total = values.sum(), idle = idle)
+        val user = values[0]
+        val nice = values[1]
+        val system = values[2]
+        val idle = values[3]
+        val iowait = values.getOrElse(4) { 0L }
+        val irq = values.getOrElse(5) { 0L }
+        val softirq = values.getOrElse(6) { 0L }
+        val steal = values.getOrElse(7) { 0L }
+        val idleAll = idle + iowait
+        val busy = user + nice + system + irq + softirq + steal
+        return Sample(total = idleAll + busy, idle = idleAll)
+    }
+
+    fun parseCpuList(spec: String): List<Int> {
+        return spec.trim().split(',').flatMap { part ->
+            val bits = part.split('-')
+            val start = bits.getOrNull(0)?.toIntOrNull() ?: return@flatMap emptyList()
+            val end = bits.getOrNull(1)?.toIntOrNull() ?: start
+            (start..end).toList()
+        }.distinct().sorted()
+    }
+
+    fun parseLoadAvg(line: String): Float? {
+        return line.trim().split(Regex("\\s+")).firstOrNull()?.toFloatOrNull()
+    }
+
+    fun freqUtilPercent(curMhz: Int?, minMhz: Int?, maxMhz: Int?): Float? {
+        if (curMhz == null || minMhz == null || maxMhz == null) return null
+        val span = (maxMhz - minMhz).coerceAtLeast(1)
+        return ((curMhz - minMhz).toFloat() / span * 100f).coerceIn(0f, 100f)
+    }
+
+    fun usageFromIdle(previousIdleUs: Long, currentIdleUs: Long, wallUs: Long): Float? {
+        if (wallUs <= 0) return null
+        val idleDelta = (currentIdleUs - previousIdleUs).coerceAtLeast(0)
+        val busy = (wallUs - idleDelta).coerceAtLeast(0)
+        return ((busy.toDouble() / wallUs) * 100.0).toFloat().coerceIn(0f, 100f)
+    }
+
+    data class UptimeSample(
+        val uptimeSec: Double,
+        val idleSec: Double,
+    )
+
+    fun parseUptime(line: String): UptimeSample? {
+        val parts = line.trim().split(Regex("\\s+"))
+        if (parts.size < 2) return null
+        val uptime = parts[0].toDoubleOrNull() ?: return null
+        val idle = parts[1].toDoubleOrNull() ?: return null
+        if (uptime < 0 || idle < 0) return null
+        return UptimeSample(uptime, idle)
+    }
+
+    /**
+     * `/proc/uptime` idle is the sum of idle time across CPUs, in seconds.
+     * Busy fraction = 1 - idleDelta / (uptimeDelta * onlineCpus).
+     */
+    fun usageFromUptime(previous: UptimeSample, current: UptimeSample, onlineCpus: Int): Float? {
+        val wall = current.uptimeSec - previous.uptimeSec
+        if (wall <= 0.0) return null
+        val idleDelta = (current.idleSec - previous.idleSec).coerceAtLeast(0.0)
+        val capacity = wall * onlineCpus.coerceAtLeast(1)
+        val busy = (capacity - idleDelta).coerceAtLeast(0.0)
+        return ((busy / capacity) * 100.0).toFloat().coerceIn(0f, 100f)
+    }
+
+    /**
+     * Spread an overall usage across cores using relative weights (usually clock
+     * speed). Average of the online cores equals [overall].
+     */
+    fun shareOverall(overall: Float, weights: List<Float>): List<Float?> {
+        val sum = weights.sum()
+        val online = weights.count { it > 0f }.coerceAtLeast(1)
+        if (sum <= 0f) return weights.map { null }
+        return weights.map { weight ->
+            if (weight <= 0f) null
+            else ((weight / sum) * overall * online).coerceIn(0f, 100f)
+        }
     }
 }
 
