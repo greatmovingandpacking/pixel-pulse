@@ -12,33 +12,29 @@ android {
         applicationId = "app.pixelpulse"
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
         create("release") {
-            val keystore = file("keystore/pixel-pulse.jks")
-            if (keystore.exists()) {
-                storeFile = keystore
-                storePassword = "pixelpulse"
-                keyAlias = "pixelpulse"
-                keyPassword = "pixelpulse"
-            }
+            storeFile = file("keystore/pixel-pulse.jks")
+            storePassword = "pixelpulse"
+            keyAlias = "pixelpulse"
+            keyPassword = "pixelpulse"
         }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            if (file("keystore/pixel-pulse.jks").exists()) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             applicationIdSuffix = ".debug"
@@ -58,6 +54,12 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
     }
 }
 
