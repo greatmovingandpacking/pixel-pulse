@@ -3,6 +3,7 @@ package app.pixelpulse.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.outlined.DeviceThermostat
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,7 +63,11 @@ import app.pixelpulse.monitor.ThermalInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(snapshot: ResourceSnapshot?) {
+fun DashboardScreen(
+    snapshot: ResourceSnapshot?,
+    onNetworkClick: () -> Unit = {},
+    onMemoryClick: () -> Unit = {},
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -111,9 +117,9 @@ fun DashboardScreen(snapshot: ResourceSnapshot?) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Box(modifier = Modifier.weight(1f)) { CpuCard(snapshot.cpu) }
-                Box(modifier = Modifier.weight(1f)) { MemoryCard(snapshot.memory) }
+                Box(modifier = Modifier.weight(1f)) { MemoryCard(snapshot.memory, onMemoryClick) }
             }
-            NetworkCard(snapshot.network)
+            NetworkCard(snapshot.network, onNetworkClick)
             StorageCard(snapshot.storage)
             FooterRow(snapshot.thermal)
             Spacer(Modifier.height(12.dp))
@@ -124,10 +130,13 @@ fun DashboardScreen(snapshot: ResourceSnapshot?) {
 @Composable
 private fun DashboardCard(
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         tonalElevation = 2.dp,
@@ -310,10 +319,14 @@ private fun CoreBars(cpu: CpuInfo) {
 }
 
 @Composable
-private fun MemoryCard(memory: MemoryStats) {
-    DashboardCard {
+private fun MemoryCard(memory: MemoryStats, onClick: () -> Unit) {
+    DashboardCard(onClick = onClick) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            CardHeader(icon = { Icon(Icons.Outlined.Memory, null) }, title = "Memory")
+            CardHeader(
+                icon = { Icon(Icons.Outlined.Memory, null) },
+                title = "Memory",
+                trailingIcon = true,
+            )
             Text(
                 text = Formatters.percent(memory.usedPercent),
                 style = MaterialTheme.typography.headlineMedium,
@@ -331,7 +344,7 @@ private fun MemoryCard(memory: MemoryStats) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                text = if (memory.lowMemory) "Low memory" else "${Formatters.bytes(memory.availBytes)} free",
+                text = if (memory.lowMemory) "Low memory" else "${Formatters.bytes(memory.availBytes)} free · apps",
                 style = MaterialTheme.typography.labelMedium,
                 color = if (memory.lowMemory) {
                     MaterialTheme.colorScheme.error
@@ -344,13 +357,14 @@ private fun MemoryCard(memory: MemoryStats) {
 }
 
 @Composable
-private fun NetworkCard(network: NetworkInfo) {
-    DashboardCard {
+private fun NetworkCard(network: NetworkInfo, onClick: () -> Unit) {
+    DashboardCard(onClick = onClick) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             CardHeader(
                 icon = { Icon(Icons.Outlined.Wifi, null) },
                 title = "Network",
                 trailing = network.transportLabel,
+                trailingIcon = true,
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
@@ -379,7 +393,7 @@ private fun NetworkCard(network: NetworkInfo) {
                 }
             }
             Text(
-                text = extras.joinToString(" · "),
+                text = extras.joinToString(" · ") + " · tap for apps & history",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -453,17 +467,25 @@ private fun CardHeader(
     icon: @Composable () -> Unit,
     title: String,
     trailing: String? = null,
+    trailingIcon: Boolean = false,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) { icon() }
         Spacer(Modifier.width(8.dp))
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.weight(1f))
         if (trailing != null) {
-            Spacer(Modifier.weight(1f))
             Text(
                 trailing,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (trailingIcon) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
