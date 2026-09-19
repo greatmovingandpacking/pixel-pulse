@@ -18,10 +18,9 @@ import android.os.PowerManager
 import android.os.StatFs
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
-import java.io.File
 
 class ResourceCollector(private val context: Context) {
-    private var lastCpu: Map<String, CpuMath.Sample> = emptyMap()
+    private val cpuSampler = CpuSampler()
     private var lastRx: Long = TrafficStats.getTotalRxBytes()
     private var lastTx: Long = TrafficStats.getTotalTxBytes()
     private var lastNetAt: Long = SystemClock.elapsedRealtime()
@@ -151,67 +150,7 @@ class ResourceCollector(private val context: Context) {
         )
     }
 
-    private fun cpuInfo(): CpuInfo {
-        val samples = readProcStat()
-        val usages = linkedMapOf<String, Float?>()
-        if (samples.isNotEmpty() && lastCpu.isNotEmpty()) {
-            for ((name, current) in samples) {
-                val previous = lastCpu[name] ?: continue
-                usages[name] = CpuMath.usagePercent(previous, current)
-            }
-        }
-        if (samples.isNotEmpty()) lastCpu = samples
-
-        val coreCount = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        val cores = (0 until coreCount).map { index ->
-            val usage = usages["cpu$index"] ?: usages["cpu$index".trim()]
-            CoreInfo(
-                index = index,
-                usagePercent = usage,
-                freqMhz = readCoreFreqMhz(index),
-            )
-        }
-        val overall = usages["cpu"] ?: cores.mapNotNull { it.usagePercent }.takeIf { it.isNotEmpty() }?.average()?.toFloat()
-        val freqs = cores.mapNotNull { it.freqMhz }
-        return CpuInfo(
-            usagePercent = overall,
-            cores = cores,
-            minFreqMhz = freqs.minOrNull(),
-            maxFreqMhz = freqs.maxOrNull(),
-        )
-    }
-
-    private fun readProcStat(): Map<String, CpuMath.Sample> {
-        return try {
-            File("/proc/stat").useLines { lines ->
-                lines
-                    .takeWhile { it.startsWith("cpu") }
-                    .mapNotNull { line ->
-                        val name = line.trim().split(Regex("\\s+")).firstOrNull() ?: return@mapNotNull null
-                        CpuMath.parseProcStatLine(line)?.let { name to it }
-                    }
-                    .toMap()
-            }
-        } catch (_: Exception) {
-            emptyMap()
-        }
-    }
-
-    private fun readCoreFreqMhz(index: Int): Int? {
-        val paths = listOf(
-            "/sys/devices/system/cpu/cpu$index/cpufreq/scaling_cur_freq",
-            "/sys/devices/system/cpu/cpu$index/cpufreq/cpuinfo_cur_freq",
-        )
-        for (path in paths) {
-            try {
-                val khz = File(path).takeIf { it.canRead() }?.readText()?.trim()?.toLongOrNull() ?: continue
-                if (khz > 0) return (khz / 1000L).toInt()
-            } catch (_: Exception) {
-                // try next path
-            }
-        }
-        return null
-    }
+    private fun cpuInfo(): CpuInfo = cpuSampler.sample()
 
     private fun networkInfo(): NetworkInfo {
         val cm = context.getSystemService(ConnectivityManager::class.java)
