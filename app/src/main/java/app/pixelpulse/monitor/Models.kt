@@ -83,6 +83,15 @@ data class NetworkInfo(
     val downlinkCapKbps: Int?,
     val uplinkCapKbps: Int?,
     val wifiLinkMbps: Int?,
+    val validated: Boolean = false,
+    val captivePortal: Boolean = false,
+    val partialConnectivity: Boolean = false,
+    val metered: Boolean = false,
+    val roaming: Boolean = false,
+    val wifiRssi: Int? = null,
+    val wifiFrequencyMhz: Int? = null,
+    val wifiStandardLabel: String? = null,
+    val cellularLevel: Int? = null,
 )
 
 data class StorageInfo(
