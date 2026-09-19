@@ -13,8 +13,17 @@ class PerAppNetworkCollector(
     private val previous = mutableMapOf<Int, BytePair>()
     private val histories = mutableMapOf<Int, ArrayDeque<RatePoint>>()
 
+    @Synchronized
     fun collect(nowMs: Long, windowMs: Long): List<AppNetworkUsage> {
         if (nsm == null) return emptyList()
+        return try {
+            collectLocked(nowMs, windowMs)
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    private fun collectLocked(nowMs: Long, windowMs: Long): List<AppNetworkUsage> {
         val start = nowMs - windowMs
         val acc = mutableMapOf<Int, Accumulator>()
         queryInto(ConnectivityManager.TYPE_WIFI, start, nowMs, acc, wifi = true)
@@ -64,7 +73,7 @@ class PerAppNetworkCollector(
             return
         } catch (_: Exception) {
             return
-        }
+        } ?: return
         val bucket = NetworkStats.Bucket()
         try {
             while (stats.hasNextBucket()) {
@@ -82,8 +91,13 @@ class PerAppNetworkCollector(
                     row.background += combined
                 }
             }
+        } catch (_: Throwable) {
+            // A bad bucket or binder failure should not take down the app.
         } finally {
-            stats.close()
+            try {
+                stats.close()
+            } catch (_: Throwable) {
+            }
         }
     }
 

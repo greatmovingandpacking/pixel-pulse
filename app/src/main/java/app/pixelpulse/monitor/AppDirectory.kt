@@ -4,17 +4,18 @@ import android.content.Context
 import android.app.usage.NetworkStats
 import android.content.pm.ApplicationInfo
 import android.graphics.drawable.Drawable
+import java.util.concurrent.ConcurrentHashMap
 
 class AppDirectory(context: Context) {
     private val pm = context.applicationContext.packageManager
-    private val labels = mutableMapOf<Int, AppIdentity>()
-    private val icons = mutableMapOf<String, Drawable>()
+    private val labels = ConcurrentHashMap<Int, AppIdentity>()
+    private val icons = ConcurrentHashMap<String, Drawable>()
 
     fun identity(uid: Int): AppIdentity {
         labels[uid]?.let { return it }
         val built = buildIdentity(uid)
-        labels[uid] = built
-        return built
+        val existing = labels.putIfAbsent(uid, built)
+        return existing ?: built
     }
 
     fun icon(packageName: String?): Drawable? {
@@ -22,8 +23,8 @@ class AppDirectory(context: Context) {
         icons[packageName]?.let { return it }
         return try {
             val drawable = pm.getApplicationIcon(packageName)
-            icons[packageName] = drawable
-            drawable
+            val existing = icons.putIfAbsent(packageName, drawable)
+            existing ?: drawable
         } catch (_: Exception) {
             null
         }
