@@ -75,6 +75,10 @@ data class AppCpuUsage(
     val history: List<CpuPoint>,
 )
 
+object CpuWindows {
+    const val WINDOW_MS = 30_000L
+}
+
 data class CpuDetail(
     val overallPercent: Float?,
     val sourceLabel: String,
@@ -82,6 +86,8 @@ data class CpuDetail(
     val apps: List<AppCpuUsage>,
     val readableProcessCount: Int,
     val note: String,
+    val hasUsageAccess: Boolean = false,
+    val windowMs: Long = CpuWindows.WINDOW_MS,
 )
 
 data class MemoryDetail(
