@@ -32,8 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.pixelpulse.monitor.AppCpuUsage
 import app.pixelpulse.monitor.AppDirectory
+import app.pixelpulse.monitor.CpuChartMath
 import app.pixelpulse.monitor.CpuDetail
-import app.pixelpulse.monitor.Formatters
+import app.pixelpulse.monitor.CpuWindows
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,7 +46,13 @@ fun CpuDetailScreen(
 ) {
     BackHandler(onBack = onBack)
     val palette = cpuPalette()
-    val series = detail.apps.filter { it.history.size >= 2 }.take(6)
+    val nowMs = detail.apps.maxOfOrNull { row ->
+        row.history.maxOfOrNull { point -> point.timestampMs } ?: 0L
+    }?.takeIf { it > 0L } ?: System.currentTimeMillis()
+    val windowMs = detail.windowMs.takeIf { it > 0L } ?: CpuWindows.WINDOW_MS
+    val series = detail.apps
+        .filter { CpuChartMath.windowed(it.history, nowMs, windowMs).size >= 2 }
+        .take(6)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -79,10 +86,16 @@ fun CpuDetailScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (!detail.hasUsageAccess) {
+                UsageAccessPrompt(
+                    title = "Find apps like YouTube",
+                    extra = "Usage access lets Pulse see which apps are running so it can read their UID CPU time. Without it, Android often hides everyone except Pulse.",
+                )
+            }
             DetailCard {
                 Text("Apps using the CPU", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "Each color is one app. The line is that app’s share of all cores, updated while Pulse is open.",
+                    "Each color is one app. The graph is a fixed last-30-seconds window — new samples land on the right, older ones scroll off the left.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -90,7 +103,16 @@ fun CpuDetailScreen(
                 if (series.isEmpty()) {
                     Text("Collecting the first samples…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    AppCpuChart(series, palette)
+                    AppCpuChart(series, palette, nowMs, windowMs)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("−30s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("now", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Spacer(Modifier.height(12.dp))
                     series.forEachIndexed { index, row ->
                         LegendRow(palette[index % palette.size], row.app.label, row.percent)
@@ -105,7 +127,7 @@ fun CpuDetailScreen(
                 } else {
                     detail.apps.forEachIndexed { index, row ->
                         if (index > 0) Spacer(Modifier.height(12.dp))
-                        AppCpuRow(row, apps, palette[index % palette.size])
+                        AppCpuRow(row, apps, palette[index % palette.size], nowMs, windowMs)
                     }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -139,7 +161,13 @@ private fun LegendRow(color: Color, label: String, percent: Float) {
 }
 
 @Composable
-private fun AppCpuRow(row: AppCpuUsage, directory: AppDirectory, color: Color) {
+private fun AppCpuRow(
+    row: AppCpuUsage,
+    directory: AppDirectory,
+    color: Color,
+    nowMs: Long,
+    windowMs: Long,
+) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         AppGlyph(directory.icon(row.app.packageName), row.app.label)
         Spacer(Modifier.width(12.dp))
@@ -150,9 +178,9 @@ private fun AppCpuRow(row: AppCpuUsage, directory: AppDirectory, color: Color) {
                 if (row.processCount > 1) add("${row.processCount} processes")
             }
             Text(extra.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (row.history.size >= 2) {
+            if (CpuChartMath.windowed(row.history, nowMs, windowMs).size >= 2) {
                 Spacer(Modifier.height(6.dp))
-                CpuSparkline(row.history.map { it.percent }, color = color, modifier = Modifier.height(28.dp))
+                CpuSparkline(row.history, nowMs, windowMs, color = color, modifier = Modifier.height(28.dp))
             }
         }
         Text("${row.percent.roundToInt()}%", fontWeight = FontWeight.SemiBold)

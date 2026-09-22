@@ -8,7 +8,11 @@ import app.pixelpulse.monitor.MemoryBreakdownCollector
 import app.pixelpulse.monitor.NetworkDiagnose
 import app.pixelpulse.monitor.NetworkFinding
 import app.pixelpulse.monitor.NetworkInfo
+import app.pixelpulse.monitor.CpuChartMath
+import app.pixelpulse.monitor.CpuPoint
+import app.pixelpulse.monitor.CpuWindows
 import app.pixelpulse.monitor.ProcCpuParser
+import app.pixelpulse.monitor.ProcessCpuCollector
 import app.pixelpulse.monitor.ProcessMemoryRow
 import app.pixelpulse.monitor.ThermalMath
 import app.pixelpulse.monitor.ThermalZone
@@ -124,5 +128,44 @@ class DetailLogicTest {
         assertEquals(50L, sample.jiffies)
         val percent = ProcCpuParser.percentOfAll(50, 1_000, 100, 8)!!
         assertEquals(6.25f, percent, 0.05f)
+    }
+
+    @Test
+    fun uidCpuParsersAndMicrosShare() {
+        assertEquals(10_123 to 3_000L, ProcCpuParser.parseUidStatLine("10123: 1000 2000"))
+        assertEquals(10_123 to 3_000L, ProcCpuParser.parseUidStatLine("10123 1000 2000"))
+        val block = ProcCpuParser.parseUidStat("0: 10 20\n10123: 1000 2000\n")
+        assertEquals(30L, block[0])
+        assertEquals(3_000L, block[10_123])
+        assertEquals(
+            5_000L,
+            ProcCpuParser.parseCpuStatUsageUsec("usage_usec 5000\nuser_usec 3000\nsystem_usec 2000\n"),
+        )
+        assertEquals(4_000L, ProcCpuParser.parseCpuStatUsageUsec("user_usec 3000\nsystem_usec 1000\n"))
+        assertEquals(2_000L, ProcCpuParser.parseCpuacctUsageNs("2000000\n"))
+        assertEquals(500_000L, ProcCpuParser.jiffiesToMicros(50, 100))
+        val percent = ProcCpuParser.percentFromMicros(1_000_000, 1_000, 8)!!
+        assertEquals(12.5f, percent, 0.05f)
+        assertEquals(6.25f, ProcCpuParser.percentFromMicros(500_000, 1_000, 8)!!, 0.05f)
+    }
+
+    @Test
+    fun cpuChartKeepsLast30Seconds() {
+        val now = 100_000L
+        val points = listOf(
+            CpuPoint(now - 45_000, 10f),
+            CpuPoint(now - 20_000, 20f),
+            CpuPoint(now - 1_000, 30f),
+        )
+        val windowed = CpuChartMath.windowed(points, now, CpuWindows.WINDOW_MS)
+        assertEquals(2, windowed.size)
+        assertEquals(20f, windowed.first().percent, 0.01f)
+        assertEquals(0f, CpuChartMath.xFraction(now - 30_000, now), 0.001f)
+        assertEquals(1f, CpuChartMath.xFraction(now, now), 0.001f)
+        assertEquals(0.5f, CpuChartMath.xFraction(now - 15_000, now), 0.001f)
+        assertTrue(ProcessCpuCollector.isAppUid(10_123))
+        assertTrue(!ProcessCpuCollector.isAppUid(1_000))
+        assertTrue(ProcessCpuCollector.keepRow(0f, points, now))
+        assertTrue(!ProcessCpuCollector.keepRow(0f, listOf(CpuPoint(now - 45_000, 8f)), now))
     }
 }
