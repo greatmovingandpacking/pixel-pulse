@@ -68,6 +68,7 @@ fun DashboardScreen(
     snapshot: ResourceSnapshot?,
     onNetworkClick: () -> Unit = {},
     onMemoryClick: () -> Unit = {},
+    onCpuClick: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -117,7 +118,7 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Box(modifier = Modifier.weight(1f)) { CpuCard(snapshot.cpu) }
+                Box(modifier = Modifier.weight(1f)) { CpuCard(snapshot.cpu, onCpuClick) }
                 Box(modifier = Modifier.weight(1f)) { MemoryCard(snapshot.memory, onMemoryClick) }
             }
             NetworkCard(snapshot.network, onNetworkClick)
@@ -257,24 +258,24 @@ private fun BatteryCard(battery: BatteryInfo) {
 }
 
 @Composable
-private fun CpuCard(cpu: CpuInfo) {
+private fun CpuCard(cpu: CpuInfo, onClick: () -> Unit) {
     val shown = cpu.usagePercent ?: 0f
     val animated by animateFloatAsState(targetValue = shown, animationSpec = tween(450), label = "cpu")
-    DashboardCard {
+    DashboardCard(onClick = onClick) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            CardHeader(icon = { Icon(Icons.Outlined.Speed, null) }, title = "CPU")
+            CardHeader(icon = { Icon(Icons.Outlined.Speed, null) }, title = "CPU", trailingIcon = true)
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    text = if (cpu.usagePercent == null) "—" else "${animated.roundToInt()}%",
+                    text = if (cpu.usagePercent == null) "\u2014" else "${animated.roundToInt()}%",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = when (cpu.sourceLabel) {
-                        "waiting" -> "sampling…"
+                        "waiting" -> "sampling\u2026"
                         "clock speed" -> "clock (not busy %)"
-                        else -> "live · ${cpu.sourceLabel}"
+                        else -> "live \u00b7 ${cpu.sourceLabel}"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -293,12 +294,12 @@ private fun CpuCard(cpu: CpuInfo) {
             CoreBars(cpu)
             val freq = when {
                 cpu.minFreqMhz != null && cpu.maxFreqMhz != null && cpu.minFreqMhz != cpu.maxFreqMhz ->
-                    "${Formatters.frequency(cpu.minFreqMhz)}–${Formatters.frequency(cpu.maxFreqMhz)}"
+                    "${Formatters.frequency(cpu.minFreqMhz)}\u2013${Formatters.frequency(cpu.maxFreqMhz)}"
                 else -> Formatters.frequency(cpu.maxFreqMhz ?: cpu.minFreqMhz)
             }
             val online = cpu.cores.count { it.online }
             Text(
-                text = "$online/${cpu.cores.size} cores online · $freq",
+                text = "$online/${cpu.cores.size} cores \u00b7 $freq \u00b7 tap for apps",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -408,14 +409,14 @@ private fun NetworkCard(network: NetworkInfo, onClick: () -> Unit) {
                 }
             }
             val extras = buildList {
-                add("${Formatters.bytes(network.rxTotal)} down · ${Formatters.bytes(network.txTotal)} up since boot")
+                add("${Formatters.bytes(network.rxTotal)} down \u00b7 ${Formatters.bytes(network.txTotal)} up since boot")
                 network.wifiLinkMbps?.let { add("Link $it Mbps") }
                 if (network.wifiLinkMbps == null) {
                     network.downlinkCapKbps?.let { add("Cap ${Formatters.bytes(it.toLong() * 125)}/s") }
                 }
             }
             Text(
-                text = extras.joinToString(" · ") + " · tap for apps & history",
+                text = extras.joinToString(" \u00b7 ") + " \u00b7 tap for apps & history",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -447,7 +448,7 @@ private fun StorageCard(storage: StorageInfo) {
                     .height(8.dp),
             )
             Text(
-                text = "${Formatters.bytes(storage.freeBytes)} free · ${Formatters.percent(storage.usedPercent)} used",
+                text = "${Formatters.bytes(storage.freeBytes)} free \u00b7 ${Formatters.percent(storage.usedPercent)} used",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -458,29 +459,58 @@ private fun StorageCard(storage: StorageInfo) {
 @Composable
 private fun FooterRow(thermal: ThermalInfo) {
     val hot = thermal.status >= 2
+    val headline = buildList {
+        thermal.skinCelsius?.let { add("Skin ${Formatters.temperature(it)}") }
+        thermal.cpuCelsius?.let { add("CPU ${Formatters.temperature(it)}") }
+        thermal.batteryCelsius?.let { add("Battery ${Formatters.temperature(it)}") }
+        if (isEmpty()) thermal.hottestCelsius?.let { add(Formatters.temperature(it)) }
+    }.joinToString(" \u00b7 ").ifBlank { thermal.label }
+    val extras = thermal.zones
+        .distinctBy { it.kind }
+        .take(4)
+        .joinToString(" \u00b7 ") { "${it.label} ${Formatters.temperature(it.celsius)}" }
     DashboardCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.Top) {
             Icon(
                 imageVector = Icons.Outlined.DeviceThermostat,
                 contentDescription = null,
                 tint = if (hot) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 2.dp),
             )
             Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Thermal", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Text(
-                    text = thermal.label,
+                    text = headline,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (hot) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (hot) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                 )
+                Text(
+                    text = if (extras.isNotBlank() && extras != headline) {
+                        "${thermal.label} \u00b7 $extras"
+                    } else {
+                        thermal.label
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (thermal.note.isNotBlank()) {
+                    Text(
+                        text = thermal.note,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            Text(
-                text = "v${BuildConfig.VERSION_NAME} · on-device only",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp,
-            )
         }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "v${BuildConfig.VERSION_NAME} \u00b7 on-device only",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 11.sp,
+        )
     }
 }
 

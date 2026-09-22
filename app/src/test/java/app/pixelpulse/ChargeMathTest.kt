@@ -63,7 +63,7 @@ class ChargeMathTest {
     fun formatters() {
         assertEquals("1.0 GB", Formatters.bytes(1024L * 1024 * 1024))
         assertEquals("12.0 MB/s", Formatters.rateBytesPerSec(12_582_912))
-        assertEquals("None", ThermalLabels.label(0))
+        assertEquals("Not throttling", ThermalLabels.label(0))
         assertEquals("Severe", ThermalLabels.label(3))
         assertEquals("2h 3m", Formatters.uptime(2 * 3_600_000L + 3 * 60_000L))
     }

@@ -8,7 +8,10 @@ import app.pixelpulse.monitor.MemoryBreakdownCollector
 import app.pixelpulse.monitor.NetworkDiagnose
 import app.pixelpulse.monitor.NetworkFinding
 import app.pixelpulse.monitor.NetworkInfo
+import app.pixelpulse.monitor.ProcCpuParser
 import app.pixelpulse.monitor.ProcessMemoryRow
+import app.pixelpulse.monitor.ThermalMath
+import app.pixelpulse.monitor.ThermalZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -100,5 +103,26 @@ class DetailLogicTest {
     fun usageEventFilterKeepsResumeAndIgnoresNoise() {
         assertTrue(MemoryBreakdownCollector.isTrackedUsageEvent(UsageEvents.Event.ACTIVITY_RESUMED))
         assertTrue(!MemoryBreakdownCollector.isTrackedUsageEvent(UsageEvents.Event.NONE))
+    }
+
+    @Test
+    fun thermalRawTempsAndPixelZoneNames() {
+        assertEquals(42.5f, ThermalMath.celsiusFromRaw(42_500)!!, 0.01f)
+        assertEquals(35.0f, ThermalMath.celsiusFromRaw(350)!!, 0.01f)
+        assertEquals(ThermalZone.Kind.SKIN, ThermalMath.classify("skin_therm"))
+        assertEquals(ThermalZone.Kind.SKIN, ThermalMath.classify("quiet-therm-usr"))
+        assertEquals(ThermalZone.Kind.CPU, ThermalMath.classify("cpu-0-0-usr"))
+        assertEquals(ThermalZone.Kind.TPU, ThermalMath.classify("tpu_thermal"))
+        assertEquals("Skin", ThermalMath.displayName("back_therm"))
+    }
+
+    @Test
+    fun procStatParsesJiffiesAndShare() {
+        val sample = ProcCpuParser.parseStat("142 (Pulse) S 1 0 0 0 0 0 0 0 0 0 20 30 0 0")!!
+        assertEquals(142, sample.pid)
+        assertEquals("Pulse", sample.comm)
+        assertEquals(50L, sample.jiffies)
+        val percent = ProcCpuParser.percentOfAll(50, 1_000, 100, 8)!!
+        assertEquals(6.25f, percent, 0.05f)
     }
 }
