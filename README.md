@@ -6,10 +6,10 @@ The app stays on-device. It does not request internet access or accounts. Per-ap
 
 ## Download and sideload
 
-**Install page:** https://jolly-bugle-ntfv.here.now/  
-**Direct APK:** https://jolly-bugle-ntfv.here.now/pixel-pulse-1.1.3.apk
+**Install page:** https://cosmic-desert-5t3x.here.now/  
+**Direct APK:** https://cosmic-desert-5t3x.here.now/pixel-pulse-1.1.4.apk
 
-That download is an anonymous host and expires about 24 hours after publish unless you claim it here: https://here.now/c/Z_cbVYYPnGhCqA6C
+That download is an anonymous host and expires about 24 hours after publish unless you claim it here: https://here.now/c/_VeRVGFZfV-xpPjX
 
 On a Pixel 10 Pro:
 
@@ -66,7 +66,8 @@ The signed APK is written to `app/build/outputs/apk/release/`.
 
 ## Notes
 
+- v1.1.4 stops sampling when you leave Pulse, fixes per-app speeds that sat at 0, and scales the CPU chart to 0–100%.
 - v1.1.3 keeps Pulse from crashing after Usage access is granted (per-app collectors and app icons).
-- v1 samples only while Pulse is in the foreground. That keeps the monitor from becoming a battery drain.
+- Sampling runs only while Pulse is on screen. Leaving the app stops the 1-second loop.
 - Some fields are best-effort. Android does not let unprivileged apps read every kernel counter on every build.
 - The release keystore in `app/keystore/` is for this personal sideload app so updates keep the same signature.

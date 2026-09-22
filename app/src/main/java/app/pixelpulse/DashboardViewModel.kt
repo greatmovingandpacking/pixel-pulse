@@ -9,6 +9,7 @@ import app.pixelpulse.monitor.MemoryBreakdownCollector
 import app.pixelpulse.monitor.MemoryDetail
 import app.pixelpulse.monitor.NetworkDetail
 import app.pixelpulse.monitor.NetworkDiagnose
+import app.pixelpulse.monitor.NetworkInfo
 import app.pixelpulse.monitor.PerAppNetworkCollector
 import app.pixelpulse.monitor.RatePoint
 import app.pixelpulse.monitor.ResourceCollector
@@ -19,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -33,6 +35,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val memoryBreakdown = MemoryBreakdownCollector(application.applicationContext, appDirectory)
     private val usageMutex = Mutex()
     private val timeline = ArrayDeque<RatePoint>()
+    private val foreground = MutableStateFlow(false)
+    private val visibleScreen = MutableStateFlow(MonitorScreen.Dashboard)
+    private var lastNetworkCollectMs = 0L
+    private var lastMemoryCollectMs = 0L
 
     private val _snapshot = MutableStateFlow<ResourceSnapshot?>(null)
     val snapshot: StateFlow<ResourceSnapshot?> = _snapshot.asStateFlow()
@@ -67,50 +73,35 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         viewModelScope.launch {
-            var tick = 0
-            while (isActive) {
-                try {
-                    val snap = withContext(Dispatchers.IO) { collector.sample() }
-                    _snapshot.value = snap
-                    val now = System.currentTimeMillis()
-                    timeline.addLast(
-                        RatePoint(
-                            timestampMs = now,
-                            rxBytesPerSec = snap.network.rxBytesPerSec ?: 0L,
-                            txBytesPerSec = snap.network.txBytesPerSec ?: 0L,
-                        ),
-                    )
-                    while (timeline.size > MAX_TIMELINE_POINTS) timeline.removeFirst()
-
-                    val granted = usageGranted()
-                    val sampled = tick % 2 == 0
-                    val (appRows, memory) = usageMutex.withLock {
-                        val rows = if (granted && sampled) {
-                            loadNetworkApps(now)
-                        } else {
-                            _networkDetail.value.apps
-                        }
-                        val mem = if (sampled) loadMemory(granted) else null
-                        rows to mem
+            foreground.collectLatest { active ->
+                if (!active) return@collectLatest
+                while (isActive) {
+                    try {
+                        sampleOnce()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        // Keep the live loop alive after Usage access starts filling per-app data.
                     }
-                    if (memory != null) _memoryDetail.value = memory
-                    val points = timeline.toList()
-                    _networkDetail.value = NetworkDetail(
-                        hasUsageAccess = granted,
-                        findings = NetworkDiagnose.analyze(snap.network, appRows, points, granted),
-                        timeline = points,
-                        apps = appRows,
-                        windowMs = PerAppNetworkCollector.WINDOW_MS,
-                    )
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Throwable) {
-                    // Keep the live loop alive after Usage access starts filling per-app data.
+                    delay(1_000)
                 }
-                tick++
-                delay(1_000)
             }
         }
+    }
+
+    fun setForeground(active: Boolean) {
+        if (active && !foreground.value) {
+            lastNetworkCollectMs = 0L
+            lastMemoryCollectMs = 0L
+        }
+        foreground.value = active
+    }
+
+    fun setVisibleScreen(screen: MonitorScreen) {
+        if (visibleScreen.value == screen) return
+        if (screen == MonitorScreen.Network) lastNetworkCollectMs = 0L
+        if (screen == MonitorScreen.Memory) lastMemoryCollectMs = 0L
+        visibleScreen.value = screen
     }
 
     fun refreshPermissions() {
@@ -118,33 +109,100 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 val granted = usageGranted()
                 val now = System.currentTimeMillis()
+                val visible = visibleScreen.value
                 val (appRows, memory) = usageMutex.withLock {
-                    val rows = if (granted) loadNetworkApps(now) else emptyList()
-                    rows to loadMemory(granted)
+                    val rows = when {
+                        !granted -> emptyList()
+                        visible == MonitorScreen.Network -> {
+                            lastNetworkCollectMs = now
+                            loadNetworkApps(now)
+                        }
+                        else -> _networkDetail.value.apps
+                    }
+                    val mem = if (visible == MonitorScreen.Memory) {
+                        lastMemoryCollectMs = now
+                        loadMemory(granted)
+                    } else {
+                        _memoryDetail.value.copy(hasUsageAccess = granted)
+                    }
+                    rows to mem
                 }
-                val snap = _snapshot.value
-                if (snap != null) {
-                    _networkDetail.value = _networkDetail.value.copy(
-                        hasUsageAccess = granted,
-                        apps = appRows,
-                        findings = NetworkDiagnose.analyze(
-                            snap.network,
-                            appRows,
-                            _networkDetail.value.timeline,
-                            granted,
-                        ),
-                    )
-                } else {
-                    _networkDetail.value = _networkDetail.value.copy(
-                        hasUsageAccess = granted,
-                        apps = appRows,
-                    )
-                }
+                publishNetwork(granted, appRows)
                 _memoryDetail.value = memory
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Throwable) {
             }
+        }
+    }
+
+    private suspend fun sampleOnce() {
+        val snap = withContext(Dispatchers.IO) { collector.sample() }
+        _snapshot.value = snap
+        val now = System.currentTimeMillis()
+        timeline.addLast(
+            RatePoint(
+                timestampMs = now,
+                rxBytesPerSec = snap.network.rxBytesPerSec ?: 0L,
+                txBytesPerSec = snap.network.txBytesPerSec ?: 0L,
+            ),
+        )
+        while (timeline.size > MAX_TIMELINE_POINTS) timeline.removeFirst()
+
+        val granted = usageGranted()
+        val visible = visibleScreen.value
+        val networkDue = granted &&
+            visible == MonitorScreen.Network &&
+            now - lastNetworkCollectMs >= DETAIL_INTERVAL_MS
+        val memoryDue = visible == MonitorScreen.Memory &&
+            now - lastMemoryCollectMs >= DETAIL_INTERVAL_MS
+        var appRows = if (granted) _networkDetail.value.apps else emptyList()
+        var memory: MemoryDetail? = null
+        if (!granted || networkDue || memoryDue) {
+            val loaded = usageMutex.withLock {
+                val rows = when {
+                    !granted -> emptyList()
+                    networkDue -> {
+                        lastNetworkCollectMs = now
+                        loadNetworkApps(now)
+                    }
+                    else -> appRows
+                }
+                val mem = if (memoryDue) {
+                    lastMemoryCollectMs = now
+                    loadMemory(granted)
+                } else {
+                    null
+                }
+                rows to mem
+            }
+            appRows = loaded.first
+            memory = loaded.second
+        }
+        if (memory != null) _memoryDetail.value = memory
+        publishNetwork(granted, appRows, snap.network)
+    }
+
+    private fun publishNetwork(
+        granted: Boolean,
+        appRows: List<AppNetworkUsage>,
+        network: NetworkInfo? = _snapshot.value?.network,
+    ) {
+        val points = timeline.toList()
+        if (network != null) {
+            _networkDetail.value = NetworkDetail(
+                hasUsageAccess = granted,
+                findings = NetworkDiagnose.analyze(network, appRows, points, granted),
+                timeline = points,
+                apps = appRows,
+                windowMs = PerAppNetworkCollector.WINDOW_MS,
+            )
+        } else {
+            _networkDetail.value = _networkDetail.value.copy(
+                hasUsageAccess = granted,
+                apps = appRows,
+                timeline = points,
+            )
         }
     }
 
@@ -178,5 +236,8 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     companion object {
         private const val MAX_TIMELINE_POINTS = 300
+        private const val DETAIL_INTERVAL_MS = 10_000L
     }
 }
+
+enum class MonitorScreen { Dashboard, Network, Memory }
