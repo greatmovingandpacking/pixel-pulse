@@ -170,14 +170,119 @@ object CpuMath {
         if (parts.size < 5 || !parts[0].startsWith("cpu")) return null
         val values = parts.drop(1).mapNotNull { it.toLongOrNull() }
         if (values.size < 4) return null
-        val idle = values[3] + values.getOrElse(4) { 0L }
-        return Sample(total = values.sum(), idle = idle)
+        val user = values[0]
+        val nice = values[1]
+        val system = values[2]
+        val idle = values[3]
+        val iowait = values.getOrElse(4) { 0L }
+        val irq = values.getOrElse(5) { 0L }
+        val softirq = values.getOrElse(6) { 0L }
+        val steal = values.getOrElse(7) { 0L }
+        val idleAll = idle + iowait
+        val busy = user + nice + system + irq + softirq + steal
+        return Sample(total = idleAll + busy, idle = idleAll)
+    }
+
+    fun parseCpuList(spec: String): List<Int> {
+        return spec.trim().split(',').flatMap { part ->
+            val bits = part.split('-')
+            val start = bits.getOrNull(0)?.toIntOrNull() ?: return@flatMap emptyList()
+            val end = bits.getOrNull(1)?.toIntOrNull() ?: start
+            (start..end).toList()
+        }.distinct().sorted()
+    }
+
+    fun parseLoadAvg(line: String): Float? {
+        return line.trim().split(Regex("\\s+")).firstOrNull()?.toFloatOrNull()
+    }
+
+    fun freqUtilPercent(curMhz: Int?, minMhz: Int?, maxMhz: Int?): Float? {
+        if (curMhz == null || minMhz == null || maxMhz == null) return null
+        val span = (maxMhz - minMhz).coerceAtLeast(1)
+        return ((curMhz - minMhz).toFloat() / span * 100f).coerceIn(0f, 100f)
+    }
+
+    fun usageFromIdle(previousIdleUs: Long, currentIdleUs: Long, wallUs: Long): Float? {
+        if (wallUs <= 0) return null
+        val idleDelta = (currentIdleUs - previousIdleUs).coerceAtLeast(0)
+        val busy = (wallUs - idleDelta).coerceAtLeast(0)
+        return ((busy.toDouble() / wallUs) * 100.0).toFloat().coerceIn(0f, 100f)
+    }
+
+    data class UptimeSample(
+        val uptimeSec: Double,
+        val idleSec: Double,
+    )
+
+    fun parseUptime(line: String): UptimeSample? {
+        val parts = line.trim().split(Regex("\\s+"))
+        if (parts.size < 2) return null
+        val uptime = parts[0].toDoubleOrNull() ?: return null
+        val idle = parts[1].toDoubleOrNull() ?: return null
+        if (uptime < 0 || idle < 0) return null
+        return UptimeSample(uptime, idle)
+    }
+
+    /**
+     * `/proc/uptime` idle is the sum of idle time across CPUs, in seconds.
+     * Busy fraction = 1 - idleDelta / (uptimeDelta * onlineCpus).
+     */
+    fun usageFromUptime(previous: UptimeSample, current: UptimeSample, onlineCpus: Int): Float? {
+        val wall = current.uptimeSec - previous.uptimeSec
+        if (wall <= 0.0) return null
+        val idleDelta = (current.idleSec - previous.idleSec).coerceAtLeast(0.0)
+        val capacity = wall * onlineCpus.coerceAtLeast(1)
+        val busy = (capacity - idleDelta).coerceAtLeast(0.0)
+        return ((busy / capacity) * 100.0).toFloat().coerceIn(0f, 100f)
+    }
+
+    /**
+     * Spread an overall usage across cores using relative weights (usually clock
+     * speed). Average of the online cores equals [overall]. If a weighted share
+     * would pass 100%, every online core gets [overall] so the bars still match
+     * the headline.
+     */
+    fun shareOverall(overall: Float, weights: List<Float>): List<Float?> {
+        val sum = weights.sum()
+        val online = weights.count { it > 0f }.coerceAtLeast(1)
+        if (sum <= 0f) return weights.map { null }
+        val weighted = weights.map { weight ->
+            if (weight <= 0f) null else (weight / sum) * overall * online
+        }
+        if (weighted.any { it != null && it > 100f }) {
+            val flat = overall.coerceIn(0f, 100f)
+            return weights.map { weight -> if (weight <= 0f) null else flat }
+        }
+        return weighted.map { it?.coerceIn(0f, 100f) }
+    }
+}
+
+object TrafficMath {
+    /** Integrate per-second rates across real sample gaps. A long pause does not invent traffic. */
+    fun bytesOver(points: List<RatePoint>, select: (RatePoint) -> Long): Long {
+        if (points.size < 2) return 0L
+        var sum = 0.0
+        for (index in 1 until points.size) {
+            val dtSec = ((points[index].timestampMs - points[index - 1].timestampMs) / 1000.0).coerceIn(0.0, 5.0)
+            sum += select(points[index]) * dtSec
+        }
+        return sum.toLong()
+    }
+
+    fun spanLabel(points: List<RatePoint>): String {
+        if (points.size < 2) return "Just started"
+        val sec = ((points.last().timestampMs - points.first().timestampMs) / 1000L).coerceAtLeast(0L)
+        return when {
+            sec < 90 -> "Last ${sec.coerceAtLeast(1)} seconds"
+            sec < 3_600 -> "Last ${((sec + 30) / 60).coerceAtLeast(1)} minutes"
+            else -> "Last ${sec / 3_600}h ${(sec % 3_600) / 60}m"
+        }
     }
 }
 
 object ThermalLabels {
     fun label(status: Int): String = when (status) {
-        0 -> "None"
+        0 -> "Not throttling"
         1 -> "Light"
         2 -> "Moderate"
         3 -> "Severe"
@@ -185,5 +290,171 @@ object ThermalLabels {
         5 -> "Emergency"
         6 -> "Shutdown"
         else -> "Unknown"
+    }
+}
+
+object ThermalMath {
+    fun celsiusFromRaw(raw: Long): Float? {
+        if (raw == 0L) return null
+        val celsius = when {
+            kotlin.math.abs(raw) >= 1_000 -> raw / 1_000f
+            kotlin.math.abs(raw) >= 200 -> raw / 10f
+            else -> raw.toFloat()
+        }
+        return celsius.takeIf { it in -20f..120f }
+    }
+
+    fun classify(type: String): ThermalZone.Kind {
+        val t = type.lowercase()
+        return when {
+            t.contains("skin") || t.contains("quiet-therm") || t.contains("back_therm") ||
+                t.contains("fps-therm") || t.contains("ambient") -> ThermalZone.Kind.SKIN
+            t.contains("battery") || t == "batt" -> ThermalZone.Kind.BATTERY
+            t.contains("gpu") -> ThermalZone.Kind.GPU
+            t.contains("tpu") -> ThermalZone.Kind.TPU
+            t.contains("cpu") -> ThermalZone.Kind.CPU
+            t.contains("charg") || t.contains("usb") -> ThermalZone.Kind.CHARGE
+            t.contains("disp") || t.contains("panel") -> ThermalZone.Kind.DISPLAY
+            t.contains("soc") || t.contains("tsens") || t.contains("xo-therm") -> ThermalZone.Kind.SOC
+            else -> ThermalZone.Kind.OTHER
+        }
+    }
+
+    fun displayName(type: String): String {
+        val cleaned = type
+            .replace(Regex("-(usr|adc|user)$"), "")
+            .replace('_', '-')
+        return when (classify(type)) {
+            ThermalZone.Kind.SKIN -> "Skin"
+            ThermalZone.Kind.CPU -> if (cleaned.contains("cpu", ignoreCase = true)) humanize(cleaned) else "CPU"
+            ThermalZone.Kind.GPU -> "GPU"
+            ThermalZone.Kind.TPU -> "TPU"
+            ThermalZone.Kind.BATTERY -> "Battery"
+            ThermalZone.Kind.CHARGE -> "Charge"
+            ThermalZone.Kind.DISPLAY -> "Display"
+            ThermalZone.Kind.SOC -> "SoC"
+            ThermalZone.Kind.OTHER -> humanize(cleaned)
+        }
+    }
+
+    fun kindLabel(kind: ThermalZone.Kind): String = when (kind) {
+        ThermalZone.Kind.SKIN -> "Skin"
+        ThermalZone.Kind.CPU -> "CPU"
+        ThermalZone.Kind.GPU -> "GPU"
+        ThermalZone.Kind.TPU -> "TPU"
+        ThermalZone.Kind.BATTERY -> "Battery"
+        ThermalZone.Kind.CHARGE -> "Charge"
+        ThermalZone.Kind.DISPLAY -> "Display"
+        ThermalZone.Kind.SOC -> "SoC"
+        ThermalZone.Kind.OTHER -> "Sensor"
+    }
+
+    private fun humanize(value: String): String {
+        return value.split('-', '_', '.')
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { part -> part.replaceFirstChar { ch -> ch.titlecase() } }
+            .ifBlank { value }
+    }
+}
+
+object ProcCpuParser {
+    data class Sample(
+        val pid: Int,
+        val comm: String,
+        val jiffies: Long,
+    )
+
+    fun parseStat(line: String): Sample? {
+        val open = line.indexOf('(')
+        val close = line.lastIndexOf(')')
+        if (open <= 0 || close <= open) return null
+        val pid = line.substring(0, open).trim().toIntOrNull() ?: return null
+        val comm = line.substring(open + 1, close).ifBlank { "pid $pid" }
+        val rest = line.substring(close + 1).trim().split(Regex("\\s+"))
+        val utime = rest.getOrNull(11)?.toLongOrNull() ?: return null
+        val stime = rest.getOrNull(12)?.toLongOrNull() ?: return null
+        return Sample(pid, comm, utime + stime)
+    }
+
+    fun percentOfAll(deltaJiffies: Long, dtMs: Long, ticksPerSec: Long, onlineCpus: Int): Float? {
+        if (deltaJiffies < 0 || dtMs < 40) return null
+        val capacity = (ticksPerSec.coerceAtLeast(1) * (dtMs / 1000.0) * onlineCpus.coerceAtLeast(1))
+        if (capacity <= 0.0) return null
+        return ((deltaJiffies / capacity) * 100.0).toFloat().coerceIn(0f, 100f)
+    }
+
+    fun percentFromMicros(deltaUs: Long, dtMs: Long, onlineCpus: Int): Float? {
+        if (deltaUs < 0 || dtMs < 40) return null
+        val capacityUs = dtMs * 1_000.0 * onlineCpus.coerceAtLeast(1)
+        if (capacityUs <= 0.0) return null
+        return ((deltaUs / capacityUs) * 100.0).toFloat().coerceIn(0f, 100f)
+    }
+
+    fun jiffiesToMicros(jiffies: Long, ticksPerSec: Long): Long {
+        return jiffies * (1_000_000L / ticksPerSec.coerceAtLeast(1L))
+    }
+
+    /** `uid: user_us sys_us` or `uid user_us sys_us` from `/proc/uid_cputime/show_uid_stat`. */
+    fun parseUidStatLine(line: String): Pair<Int, Long>? {
+        val parts = line.trim().replace(':', ' ').split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (parts.size < 2) return null
+        val uid = parts[0].toIntOrNull() ?: return null
+        val user = parts[1].toLongOrNull() ?: return null
+        val sys = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+        if (uid < 0 || user < 0 || sys < 0) return null
+        return uid to (user + sys)
+    }
+
+    fun parseUidStat(text: String): Map<Int, Long> {
+        val out = LinkedHashMap<Int, Long>()
+        text.lineSequence().forEach { line ->
+            parseUidStatLine(line)?.let { (uid, micros) -> out[uid] = micros }
+        }
+        return out
+    }
+
+    fun parseCpuStatUsageUsec(text: String): Long? {
+        var usage: Long? = null
+        var user: Long? = null
+        var system: Long? = null
+        text.lineSequence().forEach { line ->
+            val parts = line.trim().split(Regex("\\s+"))
+            if (parts.size < 2) return@forEach
+            when (parts[0]) {
+                "usage_usec" -> usage = parts[1].toLongOrNull()
+                "user_usec" -> user = parts[1].toLongOrNull()
+                "system_usec" -> system = parts[1].toLongOrNull()
+            }
+        }
+        return usage ?: run {
+            val u = user ?: return null
+            (u + (system ?: 0L)).takeIf { it >= 0L }
+        }
+    }
+
+    fun parseCpuacctUsageNs(text: String): Long? {
+        val ns = text.trim().substringBefore('\n').toLongOrNull() ?: return null
+        if (ns < 0L) return null
+        return ns / 1_000L
+    }
+}
+
+object CpuChartMath {
+    fun windowed(
+        points: List<CpuPoint>,
+        nowMs: Long,
+        windowMs: Long = CpuWindows.WINDOW_MS,
+    ): List<CpuPoint> {
+        val start = nowMs - windowMs
+        return points.filter { it.timestampMs >= start }
+    }
+
+    fun xFraction(
+        timestampMs: Long,
+        nowMs: Long,
+        windowMs: Long = CpuWindows.WINDOW_MS,
+    ): Float {
+        if (windowMs <= 0L) return 1f
+        return ((timestampMs - (nowMs - windowMs)).toFloat() / windowMs).coerceIn(0f, 1f)
     }
 }

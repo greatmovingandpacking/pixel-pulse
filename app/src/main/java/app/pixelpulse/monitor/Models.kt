@@ -64,6 +64,9 @@ data class CoreInfo(
     val index: Int,
     val usagePercent: Float?,
     val freqMhz: Int?,
+    val online: Boolean = true,
+    val minFreqMhz: Int? = null,
+    val maxFreqMhz: Int? = null,
 )
 
 data class CpuInfo(
@@ -71,6 +74,8 @@ data class CpuInfo(
     val cores: List<CoreInfo>,
     val minFreqMhz: Int?,
     val maxFreqMhz: Int?,
+    val sourceLabel: String = "waiting",
+    val history: List<Float> = emptyList(),
 )
 
 data class NetworkInfo(
@@ -83,6 +88,15 @@ data class NetworkInfo(
     val downlinkCapKbps: Int?,
     val uplinkCapKbps: Int?,
     val wifiLinkMbps: Int?,
+    val validated: Boolean = false,
+    val captivePortal: Boolean = false,
+    val partialConnectivity: Boolean = false,
+    val metered: Boolean = false,
+    val roaming: Boolean = false,
+    val wifiRssi: Int? = null,
+    val wifiFrequencyMhz: Int? = null,
+    val wifiStandardLabel: String? = null,
+    val cellularLevel: Int? = null,
 )
 
 data class StorageInfo(
@@ -92,7 +106,22 @@ data class StorageInfo(
     val usedPercent: Float,
 )
 
+data class ThermalZone(
+    val key: String,
+    val label: String,
+    val celsius: Float,
+    val kind: Kind,
+) {
+    enum class Kind { SKIN, CPU, GPU, TPU, BATTERY, CHARGE, SOC, DISPLAY, OTHER }
+}
+
 data class ThermalInfo(
     val status: Int,
     val label: String,
+    val zones: List<ThermalZone> = emptyList(),
+    val hottestCelsius: Float? = null,
+    val skinCelsius: Float? = null,
+    val cpuCelsius: Float? = null,
+    val batteryCelsius: Float? = null,
+    val note: String = "",
 )
