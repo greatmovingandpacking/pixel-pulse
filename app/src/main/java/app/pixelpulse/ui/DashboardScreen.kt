@@ -215,11 +215,12 @@ private fun BatteryCard(battery: BatteryInfo) {
                 }
                 Spacer(Modifier.width(16.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
+                    val watts = battery.powerW
                     val headline = when {
-                        battery.status == BatteryStatus.CHARGING && battery.powerW != null ->
-                            Formatters.watts(battery.powerW)
-                        battery.status == BatteryStatus.DISCHARGING && battery.powerW != null ->
-                            "${Formatters.watts(battery.powerW)} draw"
+                        watts != null && watts > 0.05 && battery.status == BatteryStatus.DISCHARGING ->
+                            "${Formatters.watts(watts)} draw"
+                        watts != null && watts > 0.05 ->
+                            Formatters.watts(watts)
                         else -> ResourceCollector.sourceLabel(battery.source)
                     }
                     Text(
@@ -264,16 +265,16 @@ private fun CpuCard(cpu: CpuInfo) {
             CardHeader(icon = { Icon(Icons.Outlined.Speed, null) }, title = "CPU")
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    text = if (cpu.usagePercent == null) "\u2014" else "${animated.roundToInt()}%",
+                    text = if (cpu.usagePercent == null) "—" else "${animated.roundToInt()}%",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = when (cpu.sourceLabel) {
-                        "waiting" -> "sampling\u2026"
+                        "waiting" -> "sampling…"
                         "clock speed" -> "clock (not busy %)"
-                        else -> "live \u00b7 ${cpu.sourceLabel}"
+                        else -> "live · ${cpu.sourceLabel}"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -292,12 +293,12 @@ private fun CpuCard(cpu: CpuInfo) {
             CoreBars(cpu)
             val freq = when {
                 cpu.minFreqMhz != null && cpu.maxFreqMhz != null && cpu.minFreqMhz != cpu.maxFreqMhz ->
-                    "${Formatters.frequency(cpu.minFreqMhz)}\u2013${Formatters.frequency(cpu.maxFreqMhz)}"
+                    "${Formatters.frequency(cpu.minFreqMhz)}–${Formatters.frequency(cpu.maxFreqMhz)}"
                 else -> Formatters.frequency(cpu.maxFreqMhz ?: cpu.minFreqMhz)
             }
             val online = cpu.cores.count { it.online }
             Text(
-                text = "$online/${cpu.cores.size} cores online \u00b7 $freq",
+                text = "$online/${cpu.cores.size} cores online · $freq",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -366,7 +367,7 @@ private fun MemoryCard(memory: MemoryStats, onClick: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                text = if (memory.lowMemory) "Low memory" else "${Formatters.bytes(memory.availBytes)} free \u00b7 apps",
+                text = if (memory.lowMemory) "Low memory" else "${Formatters.bytes(memory.availBytes)} available",
                 style = MaterialTheme.typography.labelMedium,
                 color = if (memory.lowMemory) {
                     MaterialTheme.colorScheme.error
@@ -407,15 +408,14 @@ private fun NetworkCard(network: NetworkInfo, onClick: () -> Unit) {
                 }
             }
             val extras = buildList {
-                add("${Formatters.bytes(network.rxTotal)} down")
-                add("${Formatters.bytes(network.txTotal)} up")
+                add("${Formatters.bytes(network.rxTotal)} down · ${Formatters.bytes(network.txTotal)} up since boot")
                 network.wifiLinkMbps?.let { add("Link $it Mbps") }
                 if (network.wifiLinkMbps == null) {
                     network.downlinkCapKbps?.let { add("Cap ${Formatters.bytes(it.toLong() * 125)}/s") }
                 }
             }
             Text(
-                text = extras.joinToString(" \u00b7 ") + " \u00b7 tap for apps & history",
+                text = extras.joinToString(" · ") + " · tap for apps & history",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -447,7 +447,7 @@ private fun StorageCard(storage: StorageInfo) {
                     .height(8.dp),
             )
             Text(
-                text = "${Formatters.bytes(storage.freeBytes)} free \u00b7 ${Formatters.percent(storage.usedPercent)} used",
+                text = "${Formatters.bytes(storage.freeBytes)} free · ${Formatters.percent(storage.usedPercent)} used",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -475,7 +475,7 @@ private fun FooterRow(thermal: ThermalInfo) {
                 )
             }
             Text(
-                text = "v${BuildConfig.VERSION_NAME} \u00b7 on-device only",
+                text = "v${BuildConfig.VERSION_NAME} · on-device only",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
