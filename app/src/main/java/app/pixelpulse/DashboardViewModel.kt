@@ -5,9 +5,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.pixelpulse.monitor.AppDirectory
 import app.pixelpulse.monitor.AppNetworkUsage
+import app.pixelpulse.monitor.CpuDetail
 import app.pixelpulse.monitor.MemoryBreakdownCollector
 import app.pixelpulse.monitor.MemoryDetail
 import app.pixelpulse.monitor.NetworkDetail
+import app.pixelpulse.monitor.ProcessCpuCollector
 import app.pixelpulse.monitor.NetworkDiagnose
 import app.pixelpulse.monitor.NetworkInfo
 import app.pixelpulse.monitor.PerAppNetworkCollector
@@ -33,6 +35,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val appDirectory = AppDirectory(application.applicationContext)
     private val perAppNetwork = PerAppNetworkCollector(application.applicationContext, appDirectory)
     private val memoryBreakdown = MemoryBreakdownCollector(application.applicationContext, appDirectory)
+    private val processCpu = ProcessCpuCollector(application.applicationContext, appDirectory)
     private val usageMutex = Mutex()
     private val timeline = ArrayDeque<RatePoint>()
     private val foreground = MutableStateFlow(false)
@@ -68,6 +71,18 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         ),
     )
     val memoryDetail: StateFlow<MemoryDetail> = _memoryDetail.asStateFlow()
+
+    private val _cpuDetail = MutableStateFlow(
+        CpuDetail(
+            overallPercent = null,
+            sourceLabel = "waiting",
+            cores = emptyList(),
+            apps = emptyList(),
+            readableProcessCount = 0,
+            note = "",
+        ),
+    )
+    val cpuDetail: StateFlow<CpuDetail> = _cpuDetail.asStateFlow()
 
     val apps: AppDirectory get() = appDirectory
 
@@ -181,6 +196,17 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
         if (memory != null) _memoryDetail.value = memory
         publishNetwork(granted, appRows, snap.network)
+        _cpuDetail.value = withContext(Dispatchers.IO) {
+            try {
+                processCpu.collect(now, snap.cpu)
+            } catch (_: Throwable) {
+                _cpuDetail.value.copy(
+                    overallPercent = snap.cpu.usagePercent,
+                    sourceLabel = snap.cpu.sourceLabel,
+                    cores = snap.cpu.cores,
+                )
+            }
+        }
     }
 
     private fun publishNetwork(
@@ -240,4 +266,4 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 }
 
-enum class MonitorScreen { Dashboard, Network, Memory }
+enum class MonitorScreen { Dashboard, Network, Memory, Cpu }

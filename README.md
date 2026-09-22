@@ -7,7 +7,7 @@ The app stays on-device. It does not request internet access or accounts. Per-ap
 ## Download and sideload
 
 **Install page:** https://cosmic-desert-5t3x.here.now/  
-**Direct APK:** https://cosmic-desert-5t3x.here.now/pixel-pulse-1.1.4.apk
+**Direct APK:** https://cosmic-desert-5t3x.here.now/pixel-pulse-1.1.5.apk
 
 That download is an anonymous host and expires about 24 hours after publish unless you claim it here: https://here.now/c/_VeRVGFZfV-xpPjX
 
@@ -26,11 +26,11 @@ Unknown-app installs live under **Settings → Apps → Special app access → I
 Live values refresh about once a second while the app is open.
 
 - **Battery** — percent, charging state, charge source (USB / wall / wireless), watts, volts, amps, temperature, health, and a time-to-full or time-left estimate
-- **CPU** — overall busy % from kernel counters or `/proc/uptime` (Pixels usually block `/proc/stat`), per-core bars, a sparkline, and live frequencies. The card labels the source so a frozen 0% is not mistaken for idle.
+- **CPU** — overall busy % from kernel counters or `/proc/uptime` (Pixels usually block `/proc/stat`), per-core bars, a sparkline, and live frequencies. Tap the card for a colored line graph of apps Pulse can see using the CPU.
 - **Memory** — used / total RAM, plus a breakdown of apps vs file cache vs kernel, and a list of apps/services (tap the Memory card)
 - **Network** — Wi-Fi or cellular, live up/down rates, 5-minute timeline, diagnosis, and per-app usage (tap the Network card)
 - **Storage** — internal used / free
-- **Thermal** — Android thermal status (none → shutdown)
+- **Thermal** — skin / CPU / battery temperatures from Pixel thermal sensors, plus Android’s throttle level (not throttling → shutdown)
 
 Charge speed labels: Trickle, Standard, Fast charge, Super fast, plus Wireless when applicable. Watts come from `BatteryManager` current × voltage (the same source AccuBattery-style apps use). Pixel phones report current in microamps.
 
@@ -66,6 +66,7 @@ The signed APK is written to `app/build/outputs/apk/release/`.
 
 ## Notes
 
+- v1.1.5 reads Pixel thermal sensors (not just the throttle flag) and adds a CPU tap screen with per-app colored graphs.
 - v1.1.4 stops sampling when you leave Pulse, fixes per-app speeds that sat at 0, and scales the CPU chart to 0–100%.
 - v1.1.3 keeps Pulse from crashing after Usage access is granted (per-app collectors and app icons).
 - Sampling runs only while Pulse is on screen. Leaving the app stops the 1-second loop.
