@@ -106,7 +106,22 @@ data class StorageInfo(
     val usedPercent: Float,
 )
 
+data class ThermalZone(
+    val key: String,
+    val label: String,
+    val celsius: Float,
+    val kind: Kind,
+) {
+    enum class Kind { SKIN, CPU, GPU, TPU, BATTERY, CHARGE, SOC, DISPLAY, OTHER }
+}
+
 data class ThermalInfo(
     val status: Int,
     val label: String,
+    val zones: List<ThermalZone> = emptyList(),
+    val hottestCelsius: Float? = null,
+    val skinCelsius: Float? = null,
+    val cpuCelsius: Float? = null,
+    val batteryCelsius: Float? = null,
+    val note: String = "",
 )

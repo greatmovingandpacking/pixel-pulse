@@ -14,27 +14,28 @@ import android.os.BatteryManager
 import android.telephony.TelephonyManager
 import android.os.Build
 import android.os.Environment
-import android.os.PowerManager
 import android.os.StatFs
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 
 class ResourceCollector(private val context: Context) {
     private val cpuSampler = CpuSampler()
+    private val thermalSampler = ThermalSampler(context)
     private var lastRx: Long = TrafficStats.getTotalRxBytes()
     private var lastTx: Long = TrafficStats.getTotalTxBytes()
     private var lastNetAt: Long = SystemClock.elapsedRealtime()
 
     fun sample(): ResourceSnapshot {
+        val battery = batteryInfo()
         return ResourceSnapshot(
             timestampMs = System.currentTimeMillis(),
             device = deviceInfo(),
-            battery = batteryInfo(),
+            battery = battery,
             memory = memoryInfo(),
             cpu = cpuInfo(),
             network = networkInfo(),
             storage = storageInfo(),
-            thermal = thermalInfo(),
+            thermal = thermalSampler.sample(battery.temperatureC),
         )
     }
 
@@ -157,7 +158,8 @@ class ResourceCollector(private val context: Context) {
     private fun networkInfo(): NetworkInfo {
         val cm = context.getSystemService(ConnectivityManager::class.java)
         val network = cm.activeNetwork
-        val caps = network?.let { cm.getNetworkCapabilities(it) }
+        val classified = network?.let { cm.getNetworkCapabilities(it) }
+        val caps = classified
         val transports = mutableListOf<String>()
         if (caps != null) {
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) transports += "Wi-Fi"
@@ -259,15 +261,6 @@ class ResourceCollector(private val context: Context) {
         )
     }
 
-    private fun thermalInfo(): ThermalInfo {
-        val pm = context.getSystemService(PowerManager::class.java)
-        val status = try {
-            pm.currentThermalStatus
-        } catch (_: Exception) {
-            PowerManager.THERMAL_STATUS_NONE
-        }
-        return ThermalInfo(status = status, label = ThermalLabels.label(status))
-    }
 
     @Suppress("DEPRECATION")
     private fun underlyingWifi(cm: ConnectivityManager): WifiInfo? {
