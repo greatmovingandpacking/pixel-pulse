@@ -158,8 +158,7 @@ class ResourceCollector(private val context: Context) {
     private fun networkInfo(): NetworkInfo {
         val cm = context.getSystemService(ConnectivityManager::class.java)
         val network = cm.activeNetwork
-        val classified = network?.let { cm.getNetworkCapabilities(it) }
-        val caps = classified
+        val caps = network?.let { cm.getNetworkCapabilities(it) }
         val transports = mutableListOf<String>()
         if (caps != null) {
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) transports += "Wi-Fi"
@@ -279,12 +278,12 @@ class ResourceCollector(private val context: Context) {
     private fun wifiStandardLabel(info: WifiInfo?): String? {
         if (info == null) return null
         return when (info.wifiStandard) {
-            ScanResult.WIFI_STANDARD_LEGACY -> "Legacy Wi‑Fi"
-            ScanResult.WIFI_STANDARD_11N -> "Wi‑Fi 4"
-            ScanResult.WIFI_STANDARD_11AC -> "Wi‑Fi 5"
-            ScanResult.WIFI_STANDARD_11AX -> "Wi‑Fi 6"
+            ScanResult.WIFI_STANDARD_LEGACY -> "Legacy Wi\u2011Fi"
+            ScanResult.WIFI_STANDARD_11N -> "Wi\u2011Fi 4"
+            ScanResult.WIFI_STANDARD_11AC -> "Wi\u2011Fi 5"
+            ScanResult.WIFI_STANDARD_11AX -> "Wi\u2011Fi 6"
             ScanResult.WIFI_STANDARD_11AD -> "WiGig"
-            ScanResult.WIFI_STANDARD_11BE -> "Wi‑Fi 7"
+            ScanResult.WIFI_STANDARD_11BE -> "Wi\u2011Fi 7"
             else -> null
         }
     }
