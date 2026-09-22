@@ -49,6 +49,7 @@ import androidx.core.graphics.drawable.toBitmap
 import app.pixelpulse.monitor.AppDirectory
 import app.pixelpulse.monitor.AppNetworkUsage
 import app.pixelpulse.monitor.Formatters
+import app.pixelpulse.monitor.TrafficMath
 import app.pixelpulse.monitor.NetworkDetail
 import app.pixelpulse.monitor.NetworkFinding
 import app.pixelpulse.monitor.NetworkInfo
@@ -176,7 +177,7 @@ private fun DiagnosisCard(findings: List<NetworkFinding>) {
 @Composable
 private fun HistoryCard(detail: NetworkDetail) {
     DetailCard {
-        Text("Last 5 minutes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(TrafficMath.spanLabel(detail.timeline), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
             "Green is download, teal is upload. Updates every second while Pulse is open.",
             style = MaterialTheme.typography.bodySmall,
@@ -184,8 +185,8 @@ private fun HistoryCard(detail: NetworkDetail) {
         )
         Spacer(Modifier.height(12.dp))
         RateTimeline(detail.timeline)
-        val down = detail.timeline.sumOf { it.rxBytesPerSec }
-        val up = detail.timeline.sumOf { it.txBytesPerSec }
+        val down = TrafficMath.bytesOver(detail.timeline) { it.rxBytesPerSec }
+        val up = TrafficMath.bytesOver(detail.timeline) { it.txBytesPerSec }
         if (detail.timeline.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text(
@@ -202,7 +203,7 @@ private fun AppUsageCard(apps: List<AppNetworkUsage>, directory: AppDirectory) {
     DetailCard {
         Text("Apps using the network", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text(
-            "Totals are the last 5 minutes. Rates are live.",
+            "Totals are the last 5 minutes. Rates are the change since the previous sample.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -227,7 +228,7 @@ private fun AppNetworkRow(row: AppNetworkUsage, icon: Drawable?) {
             Text(row.app.label, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val share = buildList {
                 add("${Formatters.bytes(row.totalBytes)} / 5 min")
-                if (row.wifiBytes > 0) add("Wi\u2011Fi ${Formatters.bytes(row.wifiBytes)}")
+                if (row.wifiBytes > 0) add("Wi‑Fi ${Formatters.bytes(row.wifiBytes)}")
                 if (row.mobileBytes > 0) add("Cell ${Formatters.bytes(row.mobileBytes)}")
                 if (row.foregroundBytes > 0 && row.backgroundBytes > 0) {
                     val fg = row.foregroundBytes * 100 / row.totalBytes.coerceAtLeast(1)
@@ -242,8 +243,8 @@ private fun AppNetworkRow(row: AppNetworkUsage, icon: Drawable?) {
         }
         Spacer(Modifier.width(8.dp))
         Column(horizontalAlignment = Alignment.End) {
-            Text("\u2193 ${Formatters.rateBytesPerSec(row.rxBytesPerSec)}", style = MaterialTheme.typography.labelLarge)
-            Text("\u2191 ${Formatters.rateBytesPerSec(row.txBytesPerSec)}", style = MaterialTheme.typography.labelLarge)
+            Text("↓ ${Formatters.rateBytesPerSec(row.rxBytesPerSec)}", style = MaterialTheme.typography.labelLarge)
+            Text("↑ ${Formatters.rateBytesPerSec(row.txBytesPerSec)}", style = MaterialTheme.typography.labelLarge)
         }
     }
 }

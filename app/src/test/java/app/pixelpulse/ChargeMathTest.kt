@@ -1,10 +1,14 @@
 package app.pixelpulse
 
+import android.app.AppOpsManager
 import app.pixelpulse.monitor.ChargeMath
 import app.pixelpulse.monitor.ChargeSource
 import app.pixelpulse.monitor.CpuMath
 import app.pixelpulse.monitor.Formatters
+import app.pixelpulse.monitor.RatePoint
 import app.pixelpulse.monitor.ThermalLabels
+import app.pixelpulse.monitor.TrafficMath
+import app.pixelpulse.monitor.UsageAccess
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -105,6 +109,34 @@ class ChargeMathTest {
         assertTrue(shared[0]!! > shared[1]!!)
         assertNull(shared[2])
         assertEquals(25.0, listOf(shared[0]!!, shared[1]!!).average(), 0.15)
+    }
+
+    @Test
+    fun shareOverallFlattensWhenACoreWouldExceed100() {
+        val shared = CpuMath.shareOverall(80f, listOf(3000f, 1000f, 0f))
+        assertEquals(80f, shared[0]!!, 0.01f)
+        assertEquals(80f, shared[1]!!, 0.01f)
+        assertNull(shared[2])
+    }
+
+    @Test
+    fun trafficTotalsFollowRealGaps() {
+        val points = listOf(
+            RatePoint(0, 100, 0),
+            RatePoint(1_000, 1_000, 200),
+            RatePoint(3_000, 1_000, 0),
+        )
+        assertEquals(3_000L, TrafficMath.bytesOver(points) { it.rxBytesPerSec })
+        assertEquals(200L, TrafficMath.bytesOver(points) { it.txBytesPerSec })
+        assertEquals("Last 3 seconds", TrafficMath.spanLabel(points))
+    }
+
+    @Test
+    fun usageAccessUsesAppOpsModes() {
+        assertTrue(UsageAccess.allowed(AppOpsManager.MODE_ALLOWED, false))
+        assertTrue(UsageAccess.allowed(AppOpsManager.MODE_DEFAULT, true))
+        assertTrue(!UsageAccess.allowed(AppOpsManager.MODE_DEFAULT, false))
+        assertTrue(!UsageAccess.allowed(AppOpsManager.MODE_IGNORED, true))
     }
 
     @Test
