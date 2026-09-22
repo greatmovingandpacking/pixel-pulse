@@ -99,6 +99,8 @@ class ResourceCollector(private val context: Context) {
 
         val rawCurrent = manager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: Long.MIN_VALUE
         val currentMa = ChargeMath.currentMilliAmps(rawCurrent)
+        val rawAverage = manager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE) ?: Long.MIN_VALUE
+        val averageMa = ChargeMath.currentMilliAmps(rawAverage) ?: currentMa
         val powerW = ChargeMath.powerWatts(voltageV, currentMa)
         val charging = status == BatteryStatus.CHARGING ||
             (source != ChargeSource.NONE && status != BatteryStatus.DISCHARGING && (currentMa == null || currentMa > 20))
@@ -117,7 +119,7 @@ class ResourceCollector(private val context: Context) {
             chargeSpeedLabel = ChargeMath.chargeSpeedLabel(powerW, charging && status != BatteryStatus.FULL, source),
             remainingLabel = when (status) {
                 BatteryStatus.FULL -> "Full"
-                else -> ChargeMath.remainingLabel(percent, charging, currentMa, chargeCounter)
+                else -> ChargeMath.remainingLabel(percent, charging, averageMa, chargeCounter)
             },
             technology = intent?.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY),
             present = intent?.getBooleanExtra(BatteryManager.EXTRA_PRESENT, true) ?: true,
@@ -170,18 +172,25 @@ class ResourceCollector(private val context: Context) {
         val partial = caps?.hasCapability(24) == true // NET_CAPABILITY_PARTIAL_CONNECTIVITY
         val metered = caps != null && !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
         val roaming = caps != null && !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING)
-        val wifiInfo = caps?.transportInfo as? WifiInfo
+        var wifiInfo = caps?.transportInfo as? WifiInfo
+        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) {
+            transports += "VPN"
+            if (wifiInfo == null) {
+                wifiInfo = underlyingWifi(cm)
+                if (wifiInfo != null && "Wi-Fi" !in transports) transports += "Wi-Fi"
+            }
+        }
         val now = SystemClock.elapsedRealtime()
         val rx = TrafficStats.getTotalRxBytes()
         val tx = TrafficStats.getTotalTxBytes()
-        val dtSec = ((now - lastNetAt).coerceAtLeast(1)) / 1000.0
-        val rxRate = if (rx >= 0 && lastRx >= 0 && now > lastNetAt) {
-            ((rx - lastRx).coerceAtLeast(0) / dtSec).toLong()
+        val dtMs = now - lastNetAt
+        val rxRate = if (rx >= 0 && lastRx >= 0 && dtMs in 1..MAX_RATE_GAP_MS) {
+            ((rx - lastRx).coerceAtLeast(0) / (dtMs / 1000.0)).toLong()
         } else {
             null
         }
-        val txRate = if (tx >= 0 && lastTx >= 0 && now > lastNetAt) {
-            ((tx - lastTx).coerceAtLeast(0) / dtSec).toLong()
+        val txRate = if (tx >= 0 && lastTx >= 0 && dtMs in 1..MAX_RATE_GAP_MS) {
+            ((tx - lastTx).coerceAtLeast(0) / (dtMs / 1000.0)).toLong()
         } else {
             null
         }
@@ -260,6 +269,20 @@ class ResourceCollector(private val context: Context) {
         return ThermalInfo(status = status, label = ThermalLabels.label(status))
     }
 
+    @Suppress("DEPRECATION")
+    private fun underlyingWifi(cm: ConnectivityManager): WifiInfo? {
+        return try {
+            cm.allNetworks.firstNotNullOfOrNull { network ->
+                val capabilities = cm.getNetworkCapabilities(network) ?: return@firstNotNullOfOrNull null
+                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return@firstNotNullOfOrNull null
+                if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return@firstNotNullOfOrNull null
+                capabilities.transportInfo as? WifiInfo
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun wifiStandardLabel(info: WifiInfo?): String? {
         if (info == null) return null
         return when (info.wifiStandard) {
@@ -274,6 +297,8 @@ class ResourceCollector(private val context: Context) {
     }
 
     companion object {
+        private const val MAX_RATE_GAP_MS = 3_000L
+
         fun sourceLabel(source: ChargeSource): String = when (source) {
             ChargeSource.NONE -> "Battery"
             ChargeSource.AC -> "Wall charger"

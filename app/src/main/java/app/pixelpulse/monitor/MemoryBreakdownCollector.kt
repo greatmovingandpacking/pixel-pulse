@@ -40,10 +40,13 @@ class MemoryBreakdownCollector(
         val swapTotal = (kb["SwapTotal"] ?: 0L) * 1024L
         val swapFree = (kb["SwapFree"] ?: 0L) * 1024L
         val processes = collectProcesses(hasUsageAccess)
+        val othersHavePss = processes.any {
+            it.packageName != appContext.packageName && (it.pssBytes ?: 0L) > 0L
+        }
         val note = when {
-            processes.none { it.pssBytes != null && it.pssBytes > 0 } && !hasUsageAccess ->
+            !othersHavePss && !hasUsageAccess ->
                 "Android hides other apps' RAM sizes. Grant Usage access to list recently active apps and services."
-            processes.none { it.pssBytes != null && it.pssBytes > 0 } ->
+            !othersHavePss ->
                 "Android still hides per-app PSS on modern Pixels. Active apps below are from Usage access; the stacked bar is the system breakdown."
             else ->
                 "PSS is an estimate of RAM uniquely plus a fair share of shared libraries."
@@ -144,11 +147,9 @@ class MemoryBreakdownCollector(
         } ?: return
         val last = linkedMapOf<String, Pair<Long, Int>>()
         val event = UsageEvents.Event()
-        var seen = 0
         try {
-            while (events.hasNextEvent() && seen < MAX_USAGE_EVENTS) {
+            while (events.hasNextEvent()) {
                 events.getNextEvent(event)
-                seen++
                 val pkg = event.packageName ?: continue
                 if (isTrackedUsageEvent(event.eventType)) {
                     last[pkg] = event.timeStamp to event.eventType
@@ -205,8 +206,6 @@ class MemoryBreakdownCollector(
     }
 
     companion object {
-        private const val MAX_USAGE_EVENTS = 800
-
         fun isTrackedUsageEvent(eventType: Int): Boolean = when (eventType) {
             UsageEvents.Event.ACTIVITY_RESUMED,
             UsageEvents.Event.FOREGROUND_SERVICE_START,
