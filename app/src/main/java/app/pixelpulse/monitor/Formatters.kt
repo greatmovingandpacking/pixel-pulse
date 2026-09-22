@@ -382,4 +382,79 @@ object ProcCpuParser {
         if (capacity <= 0.0) return null
         return ((deltaJiffies / capacity) * 100.0).toFloat().coerceIn(0f, 100f)
     }
+
+    fun percentFromMicros(deltaUs: Long, dtMs: Long, onlineCpus: Int): Float? {
+        if (deltaUs < 0 || dtMs < 40) return null
+        val capacityUs = dtMs * 1_000.0 * onlineCpus.coerceAtLeast(1)
+        if (capacityUs <= 0.0) return null
+        return ((deltaUs / capacityUs) * 100.0).toFloat().coerceIn(0f, 100f)
+    }
+
+    fun jiffiesToMicros(jiffies: Long, ticksPerSec: Long): Long {
+        return jiffies * (1_000_000L / ticksPerSec.coerceAtLeast(1L))
+    }
+
+    /** `uid: user_us sys_us` or `uid user_us sys_us` from `/proc/uid_cputime/show_uid_stat`. */
+    fun parseUidStatLine(line: String): Pair<Int, Long>? {
+        val parts = line.trim().replace(':', ' ').split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (parts.size < 2) return null
+        val uid = parts[0].toIntOrNull() ?: return null
+        val user = parts[1].toLongOrNull() ?: return null
+        val sys = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+        if (uid < 0 || user < 0 || sys < 0) return null
+        return uid to (user + sys)
+    }
+
+    fun parseUidStat(text: String): Map<Int, Long> {
+        val out = LinkedHashMap<Int, Long>()
+        text.lineSequence().forEach { line ->
+            parseUidStatLine(line)?.let { (uid, micros) -> out[uid] = micros }
+        }
+        return out
+    }
+
+    fun parseCpuStatUsageUsec(text: String): Long? {
+        var usage: Long? = null
+        var user: Long? = null
+        var system: Long? = null
+        text.lineSequence().forEach { line ->
+            val parts = line.trim().split(Regex("\\s+"))
+            if (parts.size < 2) return@forEach
+            when (parts[0]) {
+                "usage_usec" -> usage = parts[1].toLongOrNull()
+                "user_usec" -> user = parts[1].toLongOrNull()
+                "system_usec" -> system = parts[1].toLongOrNull()
+            }
+        }
+        return usage ?: run {
+            val u = user ?: return null
+            (u + (system ?: 0L)).takeIf { it >= 0L }
+        }
+    }
+
+    fun parseCpuacctUsageNs(text: String): Long? {
+        val ns = text.trim().substringBefore('\n').toLongOrNull() ?: return null
+        if (ns < 0L) return null
+        return ns / 1_000L
+    }
+}
+
+object CpuChartMath {
+    fun windowed(
+        points: List<CpuPoint>,
+        nowMs: Long,
+        windowMs: Long = CpuWindows.WINDOW_MS,
+    ): List<CpuPoint> {
+        val start = nowMs - windowMs
+        return points.filter { it.timestampMs >= start }
+    }
+
+    fun xFraction(
+        timestampMs: Long,
+        nowMs: Long,
+        windowMs: Long = CpuWindows.WINDOW_MS,
+    ): Float {
+        if (windowMs <= 0L) return 1f
+        return ((timestampMs - (nowMs - windowMs)).toFloat() / windowMs).coerceIn(0f, 1f)
+    }
 }
