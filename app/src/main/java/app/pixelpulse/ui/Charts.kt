@@ -13,6 +13,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import app.pixelpulse.monitor.AppCpuUsage
+import app.pixelpulse.monitor.CpuChartMath
+import app.pixelpulse.monitor.CpuPoint
+import app.pixelpulse.monitor.CpuWindows
 import app.pixelpulse.monitor.RatePoint
 
 @Composable
@@ -79,9 +82,38 @@ fun CpuSparkline(
 }
 
 @Composable
+fun CpuSparkline(
+    points: List<CpuPoint>,
+    nowMs: Long,
+    windowMs: Long = CpuWindows.WINDOW_MS,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+) {
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(28.dp),
+    ) {
+        drawRoundRect(color = track.copy(alpha = 0.35f))
+        val windowed = CpuChartMath.windowed(points, nowMs, windowMs)
+        if (windowed.size < 2) return@Canvas
+        val path = Path()
+        windowed.forEachIndexed { index, point ->
+            val x = size.width * CpuChartMath.xFraction(point.timestampMs, nowMs, windowMs)
+            val y = size.height - (point.percent.coerceIn(0f, 100f) / 100f) * (size.height * 0.9f)
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, color = color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+    }
+}
+
+@Composable
 fun AppCpuChart(
     series: List<AppCpuUsage>,
     colors: List<Color>,
+    nowMs: Long,
+    windowMs: Long = CpuWindows.WINDOW_MS,
     modifier: Modifier = Modifier,
 ) {
     val track = MaterialTheme.colorScheme.surfaceVariant
@@ -91,16 +123,13 @@ fun AppCpuChart(
             .height(160.dp),
     ) {
         drawRoundRect(color = track.copy(alpha = 0.35f))
-        val aligned = series.map { it.history }.filter { it.size >= 2 }
-        val points = aligned.minOfOrNull { it.size } ?: return@Canvas
-        if (points < 2) return@Canvas
-        val stepX = size.width / (points - 1).coerceAtLeast(1)
         val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-        aligned.forEachIndexed { index, history ->
-            val values = history.takeLast(points)
+        series.forEachIndexed { index, row ->
+            val points = CpuChartMath.windowed(row.history, nowMs, windowMs)
+            if (points.size < 2) return@forEachIndexed
             val path = Path()
-            values.forEachIndexed { i, point ->
-                val x = i * stepX
+            points.forEachIndexed { i, point ->
+                val x = size.width * CpuChartMath.xFraction(point.timestampMs, nowMs, windowMs)
                 val y = size.height - (point.percent.coerceIn(0f, 100f) / 100f) * (size.height * 0.9f)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }

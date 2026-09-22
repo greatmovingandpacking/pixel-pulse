@@ -80,6 +80,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             apps = emptyList(),
             readableProcessCount = 0,
             note = "",
+            hasUsageAccess = false,
         ),
     )
     val cpuDetail: StateFlow<CpuDetail> = _cpuDetail.asStateFlow()
@@ -198,12 +199,13 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         publishNetwork(granted, appRows, snap.network)
         _cpuDetail.value = withContext(Dispatchers.IO) {
             try {
-                processCpu.collect(now, snap.cpu)
+                processCpu.collect(now, snap.cpu, granted)
             } catch (_: Throwable) {
                 _cpuDetail.value.copy(
                     overallPercent = snap.cpu.usagePercent,
                     sourceLabel = snap.cpu.sourceLabel,
                     cores = snap.cpu.cores,
+                    hasUsageAccess = granted,
                 )
             }
         }
