@@ -37,7 +37,13 @@ class AppDirectory(context: Context) {
         } catch (_: Exception) {
             emptyList()
         }
-        val primary = packages.firstOrNull()
+        val primary = packages.firstOrNull { pkg ->
+            try {
+                pm.getLaunchIntentForPackage(pkg) != null
+            } catch (_: Exception) {
+                false
+            }
+        } ?: packages.firstOrNull()
         if (primary != null) {
             val info = try {
                 pm.getApplicationInfo(primary, 0)
@@ -49,8 +55,9 @@ class AppDirectory(context: Context) {
             } catch (_: Exception) {
                 primary
             }
+            val shown = if (packages.size > 1) "$label +${packages.size - 1}" else label
             val system = info != null && (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-            return AppIdentity(uid, primary, label, system)
+            return AppIdentity(uid, primary, shown, system)
         }
         return AppIdentity(uid, null, "UID $uid", uid < 10000)
     }

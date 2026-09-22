@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -29,38 +30,50 @@ class MainActivity : ComponentActivity() {
                 val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
                 val networkDetail by viewModel.networkDetail.collectAsStateWithLifecycle()
                 val memoryDetail by viewModel.memoryDetail.collectAsStateWithLifecycle()
-                var screen by rememberSaveable { mutableStateOf(Screen.Dashboard) }
+                var screen by rememberSaveable { mutableStateOf(MonitorScreen.Dashboard) }
 
                 val lifecycleOwner = LocalLifecycleOwner.current
-                DisposableEffect(lifecycleOwner) {
+                DisposableEffect(lifecycleOwner, viewModel) {
                     val observer = LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshPermissions()
+                        when (event) {
+                            Lifecycle.Event.ON_START -> viewModel.setForeground(true)
+                            Lifecycle.Event.ON_STOP -> viewModel.setForeground(false)
+                            Lifecycle.Event.ON_RESUME -> viewModel.refreshPermissions()
+                            else -> Unit
+                        }
                     }
                     lifecycleOwner.lifecycle.addObserver(observer)
-                    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                    viewModel.setForeground(
+                        lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED),
+                    )
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
+                        viewModel.setForeground(false)
+                    }
+                }
+                LaunchedEffect(screen) {
+                    viewModel.setVisibleScreen(screen)
                 }
 
                 when (screen) {
-                    Screen.Dashboard -> DashboardScreen(
+                    MonitorScreen.Dashboard -> DashboardScreen(
                         snapshot = snapshot,
-                        onNetworkClick = { screen = Screen.Network },
-                        onMemoryClick = { screen = Screen.Memory },
+                        onNetworkClick = { screen = MonitorScreen.Network },
+                        onMemoryClick = { screen = MonitorScreen.Memory },
                     )
-                    Screen.Network -> NetworkDetailScreen(
+                    MonitorScreen.Network -> NetworkDetailScreen(
                         snapshot = snapshot?.network,
                         detail = networkDetail,
                         apps = viewModel.apps,
-                        onBack = { screen = Screen.Dashboard },
+                        onBack = { screen = MonitorScreen.Dashboard },
                     )
-                    Screen.Memory -> MemoryDetailScreen(
+                    MonitorScreen.Memory -> MemoryDetailScreen(
                         detail = memoryDetail,
                         apps = viewModel.apps,
-                        onBack = { screen = Screen.Dashboard },
+                        onBack = { screen = MonitorScreen.Dashboard },
                     )
                 }
             }
         }
     }
 }
-
-private enum class Screen { Dashboard, Network, Memory }

@@ -159,7 +159,7 @@ class CpuSampler {
             cores = cores,
             minFreqMhz = freqs.minOrNull(),
             maxFreqMhz = freqs.maxOrNull(),
-            sourceLabel = resolvedSource,
+            sourceLabel = if (shared != null) "$resolvedSource · estimated" else resolvedSource,
             history = history.toList(),
         )
     }
