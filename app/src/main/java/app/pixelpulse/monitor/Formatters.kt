@@ -238,15 +238,44 @@ object CpuMath {
 
     /**
      * Spread an overall usage across cores using relative weights (usually clock
-     * speed). Average of the online cores equals [overall].
+     * speed). Average of the online cores equals [overall]. If a weighted share
+     * would pass 100%, every online core gets [overall] so the bars still match
+     * the headline.
      */
     fun shareOverall(overall: Float, weights: List<Float>): List<Float?> {
         val sum = weights.sum()
         val online = weights.count { it > 0f }.coerceAtLeast(1)
         if (sum <= 0f) return weights.map { null }
-        return weights.map { weight ->
-            if (weight <= 0f) null
-            else ((weight / sum) * overall * online).coerceIn(0f, 100f)
+        val weighted = weights.map { weight ->
+            if (weight <= 0f) null else (weight / sum) * overall * online
+        }
+        if (weighted.any { it != null && it > 100f }) {
+            val flat = overall.coerceIn(0f, 100f)
+            return weights.map { weight -> if (weight <= 0f) null else flat }
+        }
+        return weighted.map { it?.coerceIn(0f, 100f) }
+    }
+}
+
+object TrafficMath {
+    /** Integrate per-second rates across real sample gaps. A long pause does not invent traffic. */
+    fun bytesOver(points: List<RatePoint>, select: (RatePoint) -> Long): Long {
+        if (points.size < 2) return 0L
+        var sum = 0.0
+        for (index in 1 until points.size) {
+            val dtSec = ((points[index].timestampMs - points[index - 1].timestampMs) / 1000.0).coerceIn(0.0, 5.0)
+            sum += select(points[index]) * dtSec
+        }
+        return sum.toLong()
+    }
+
+    fun spanLabel(points: List<RatePoint>): String {
+        if (points.size < 2) return "Just started"
+        val sec = ((points.last().timestampMs - points.first().timestampMs) / 1000L).coerceAtLeast(0L)
+        return when {
+            sec < 90 -> "Last ${sec.coerceAtLeast(1)} seconds"
+            sec < 3_600 -> "Last ${((sec + 30) / 60).coerceAtLeast(1)} minutes"
+            else -> "Last ${sec / 3_600}h ${(sec % 3_600) / 60}m"
         }
     }
 }

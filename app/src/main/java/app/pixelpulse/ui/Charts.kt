@@ -23,10 +23,9 @@ fun RateTimeline(
 ) {
     val track = MaterialTheme.colorScheme.surfaceVariant
     Canvas(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .height(120.dp)
-            .then(modifier),
+            .height(120.dp),
     ) {
         drawRoundRect(color = track.copy(alpha = 0.35f))
         if (points.size < 2) return@Canvas
@@ -68,12 +67,11 @@ fun CpuSparkline(
     ) {
         drawRoundRect(color = track.copy(alpha = 0.35f))
         if (values.size < 2) return@Canvas
-        val max = values.max().coerceAtLeast(1f)
         val stepX = size.width / (values.size - 1).coerceAtLeast(1)
         val path = Path()
         values.forEachIndexed { index, value ->
             val x = index * stepX
-            val y = size.height - (value / max) * (size.height * 0.9f)
+            val y = size.height - (value.coerceIn(0f, 100f) / 100f) * (size.height * 0.9f)
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         drawPath(path, color = color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))

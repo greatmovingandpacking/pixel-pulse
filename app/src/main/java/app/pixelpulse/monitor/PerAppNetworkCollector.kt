@@ -10,7 +10,8 @@ class PerAppNetworkCollector(
     private val apps: AppDirectory,
 ) {
     private val nsm = context.applicationContext.getSystemService(NetworkStatsManager::class.java)
-    private val previous = mutableMapOf<Int, BytePair>()
+    private val sessionStartMs = System.currentTimeMillis()
+    private val sessionPrevious = mutableMapOf<Int, BytePair>()
     private val histories = mutableMapOf<Int, ArrayDeque<RatePoint>>()
 
     @Synchronized
@@ -24,31 +25,43 @@ class PerAppNetworkCollector(
     }
 
     private fun collectLocked(nowMs: Long, windowMs: Long): List<AppNetworkUsage> {
-        val start = nowMs - windowMs
-        val acc = mutableMapOf<Int, Accumulator>()
-        queryInto(ConnectivityManager.TYPE_WIFI, start, nowMs, acc, wifi = true)
-        queryInto(ConnectivityManager.TYPE_MOBILE, start, nowMs, acc, wifi = false)
-        queryInto(ConnectivityManager.TYPE_ETHERNET, start, nowMs, acc, wifi = true)
+        val windowStart = (nowMs - windowMs).coerceAtLeast(0)
+        val windowAcc = mutableMapOf<Int, Accumulator>()
+        queryInto(ConnectivityManager.TYPE_WIFI, windowStart, nowMs, windowAcc, Link.WIFI)
+        queryInto(ConnectivityManager.TYPE_MOBILE, windowStart, nowMs, windowAcc, Link.MOBILE)
+        queryInto(ConnectivityManager.TYPE_ETHERNET, windowStart, nowMs, windowAcc, Link.OTHER)
 
-        val rows = acc.map { (uid, a) ->
-            val prev = previous[uid]
+        // Rates come from a counter that only grows (session start → now).
+        // Differencing the sliding 5-minute window cancels steady traffic.
+        val sessionAcc = mutableMapOf<Int, Accumulator>()
+        val sessionFrom = sessionStartMs.coerceAtMost(nowMs)
+        queryInto(ConnectivityManager.TYPE_WIFI, sessionFrom, nowMs, sessionAcc, Link.WIFI)
+        queryInto(ConnectivityManager.TYPE_MOBILE, sessionFrom, nowMs, sessionAcc, Link.MOBILE)
+        queryInto(ConnectivityManager.TYPE_ETHERNET, sessionFrom, nowMs, sessionAcc, Link.OTHER)
+
+        val rows = (windowAcc.keys + sessionAcc.keys).map { uid ->
+            val window = windowAcc[uid]
+            val session = sessionAcc[uid]
+            val prev = sessionPrevious[uid]
             val dtSec = if (prev != null) ((nowMs - prev.atMs).coerceAtLeast(1)) / 1000.0 else 0.0
-            val rxRate = if (prev != null && dtSec > 0) ((a.rx - prev.rx).coerceAtLeast(0) / dtSec).toLong() else 0L
-            val txRate = if (prev != null && dtSec > 0) ((a.tx - prev.tx).coerceAtLeast(0) / dtSec).toLong() else 0L
-            previous[uid] = BytePair(a.rx, a.tx, nowMs)
+            val sessionRx = session?.rx ?: 0L
+            val sessionTx = session?.tx ?: 0L
+            val rxRate = if (prev != null && dtSec > 0) ((sessionRx - prev.rx).coerceAtLeast(0) / dtSec).toLong() else 0L
+            val txRate = if (prev != null && dtSec > 0) ((sessionTx - prev.tx).coerceAtLeast(0) / dtSec).toLong() else 0L
+            sessionPrevious[uid] = BytePair(sessionRx, sessionTx, nowMs)
             val history = histories.getOrPut(uid) { ArrayDeque() }
             history.addLast(RatePoint(nowMs, rxRate, txRate))
             while (history.size > MAX_POINTS) history.removeFirst()
             AppNetworkUsage(
                 app = apps.identity(uid),
-                rxBytes = a.rx,
-                txBytes = a.tx,
+                rxBytes = window?.rx ?: 0L,
+                txBytes = window?.tx ?: 0L,
                 rxBytesPerSec = rxRate,
                 txBytesPerSec = txRate,
-                wifiBytes = a.wifi,
-                mobileBytes = a.mobile,
-                foregroundBytes = a.foreground,
-                backgroundBytes = a.background,
+                wifiBytes = window?.wifi ?: 0L,
+                mobileBytes = window?.mobile ?: 0L,
+                foregroundBytes = window?.foreground ?: 0L,
+                backgroundBytes = window?.background ?: 0L,
                 history = history.toList(),
             )
         }
@@ -56,7 +69,7 @@ class PerAppNetworkCollector(
             .sortedByDescending { it.totalBytes }
         val keep = rows.take(40).map { it.app.uid }.toSet()
         histories.keys.retainAll(keep)
-        previous.keys.retainAll(keep)
+        sessionPrevious.keys.retainAll(keep)
         return rows
     }
 
@@ -65,7 +78,7 @@ class PerAppNetworkCollector(
         start: Long,
         end: Long,
         acc: MutableMap<Int, Accumulator>,
-        wifi: Boolean,
+        link: Link,
     ) {
         val stats = try {
             nsm.querySummary(networkType, null, start, end)
@@ -84,7 +97,11 @@ class PerAppNetworkCollector(
                 row.rx += bucket.rxBytes
                 row.tx += bucket.txBytes
                 val combined = bucket.rxBytes + bucket.txBytes
-                if (wifi) row.wifi += combined else row.mobile += combined
+                when (link) {
+                    Link.WIFI -> row.wifi += combined
+                    Link.MOBILE -> row.mobile += combined
+                    Link.OTHER -> Unit
+                }
                 if (bucket.state == NetworkStats.Bucket.STATE_FOREGROUND) {
                     row.foreground += combined
                 } else {
@@ -100,6 +117,8 @@ class PerAppNetworkCollector(
             }
         }
     }
+
+    private enum class Link { WIFI, MOBILE, OTHER }
 
     private data class BytePair(val rx: Long, val tx: Long, val atMs: Long)
     private class Accumulator {
