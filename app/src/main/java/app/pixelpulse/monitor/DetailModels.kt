@@ -63,6 +63,27 @@ data class ProcessMemoryRow(
     enum class Kind { APP, SERVICE, CACHED, SYSTEM, UNKNOWN }
 }
 
+data class CpuPoint(
+    val timestampMs: Long,
+    val percent: Float,
+)
+
+data class AppCpuUsage(
+    val app: AppIdentity,
+    val percent: Float,
+    val processCount: Int,
+    val history: List<CpuPoint>,
+)
+
+data class CpuDetail(
+    val overallPercent: Float?,
+    val sourceLabel: String,
+    val cores: List<CoreInfo>,
+    val apps: List<AppCpuUsage>,
+    val readableProcessCount: Int,
+    val note: String,
+)
+
 data class MemoryDetail(
     val hasUsageAccess: Boolean,
     val totalBytes: Long,

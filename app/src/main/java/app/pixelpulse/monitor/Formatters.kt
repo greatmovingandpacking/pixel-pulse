@@ -282,7 +282,7 @@ object TrafficMath {
 
 object ThermalLabels {
     fun label(status: Int): String = when (status) {
-        0 -> "None"
+        0 -> "Not throttling"
         1 -> "Light"
         2 -> "Moderate"
         3 -> "Severe"
@@ -290,5 +290,96 @@ object ThermalLabels {
         5 -> "Emergency"
         6 -> "Shutdown"
         else -> "Unknown"
+    }
+}
+
+object ThermalMath {
+    fun celsiusFromRaw(raw: Long): Float? {
+        if (raw == 0L) return null
+        val celsius = when {
+            kotlin.math.abs(raw) >= 1_000 -> raw / 1_000f
+            kotlin.math.abs(raw) >= 200 -> raw / 10f
+            else -> raw.toFloat()
+        }
+        return celsius.takeIf { it in -20f..120f }
+    }
+
+    fun classify(type: String): ThermalZone.Kind {
+        val t = type.lowercase()
+        return when {
+            t.contains("skin") || t.contains("quiet-therm") || t.contains("back_therm") ||
+                t.contains("fps-therm") || t.contains("ambient") -> ThermalZone.Kind.SKIN
+            t.contains("battery") || t == "batt" -> ThermalZone.Kind.BATTERY
+            t.contains("gpu") -> ThermalZone.Kind.GPU
+            t.contains("tpu") -> ThermalZone.Kind.TPU
+            t.contains("cpu") -> ThermalZone.Kind.CPU
+            t.contains("charg") || t.contains("usb") -> ThermalZone.Kind.CHARGE
+            t.contains("disp") || t.contains("panel") -> ThermalZone.Kind.DISPLAY
+            t.contains("soc") || t.contains("tsens") || t.contains("xo-therm") -> ThermalZone.Kind.SOC
+            else -> ThermalZone.Kind.OTHER
+        }
+    }
+
+    fun displayName(type: String): String {
+        val cleaned = type
+            .replace(Regex("-(usr|adc|user)$"), "")
+            .replace('_', '-')
+        return when (classify(type)) {
+            ThermalZone.Kind.SKIN -> "Skin"
+            ThermalZone.Kind.CPU -> if (cleaned.contains("cpu", ignoreCase = true)) humanize(cleaned) else "CPU"
+            ThermalZone.Kind.GPU -> "GPU"
+            ThermalZone.Kind.TPU -> "TPU"
+            ThermalZone.Kind.BATTERY -> "Battery"
+            ThermalZone.Kind.CHARGE -> "Charge"
+            ThermalZone.Kind.DISPLAY -> "Display"
+            ThermalZone.Kind.SOC -> "SoC"
+            ThermalZone.Kind.OTHER -> humanize(cleaned)
+        }
+    }
+
+    fun kindLabel(kind: ThermalZone.Kind): String = when (kind) {
+        ThermalZone.Kind.SKIN -> "Skin"
+        ThermalZone.Kind.CPU -> "CPU"
+        ThermalZone.Kind.GPU -> "GPU"
+        ThermalZone.Kind.TPU -> "TPU"
+        ThermalZone.Kind.BATTERY -> "Battery"
+        ThermalZone.Kind.CHARGE -> "Charge"
+        ThermalZone.Kind.DISPLAY -> "Display"
+        ThermalZone.Kind.SOC -> "SoC"
+        ThermalZone.Kind.OTHER -> "Sensor"
+    }
+
+    private fun humanize(value: String): String {
+        return value.split('-', '_', '.')
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { part -> part.replaceFirstChar { ch -> ch.titlecase() } }
+            .ifBlank { value }
+    }
+}
+
+object ProcCpuParser {
+    data class Sample(
+        val pid: Int,
+        val comm: String,
+        val jiffies: Long,
+    )
+
+    fun parseStat(line: String): Sample? {
+        val open = line.indexOf('(')
+        val close = line.lastIndexOf(')')
+        if (open <= 0 || close <= open) return null
+        val pid = line.substring(0, open).trim().toIntOrNull() ?: return null
+        val comm = line.substring(open + 1, close).ifBlank { "pid $pid" }
+        val rest = line.substring(close + 1).trim().split(Regex("\\s+"))
+        val utime = rest.getOrNull(11)?.toLongOrNull() ?: return null
+        val stime = rest.getOrNull(12)?.toLongOrNull() ?: return null
+        return Sample(pid, comm, utime + stime)
+    }
+
+    fun percentOfAll(deltaJiffies: Long, dtMs: Long, ticksPerSec: Long, onlineCpus: Int): Float? {
+        if (deltaJiffies < 0 || dtMs < 40) return null
+        val capacity = (ticksPerSec.coerceAtLeast(1) * (dtMs / 1000.0) * onlineCpus.coerceAtLeast(1))
+        if (capacity <= 0.0) return null
+        return ((deltaJiffies / capacity) * 100.0).toFloat().coerceIn(0f, 100f)
     }
 }

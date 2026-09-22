@@ -15,6 +15,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.pixelpulse.ui.CpuDetailScreen
 import app.pixelpulse.ui.DashboardScreen
 import app.pixelpulse.ui.MemoryDetailScreen
 import app.pixelpulse.ui.NetworkDetailScreen
@@ -30,6 +31,7 @@ class MainActivity : ComponentActivity() {
                 val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
                 val networkDetail by viewModel.networkDetail.collectAsStateWithLifecycle()
                 val memoryDetail by viewModel.memoryDetail.collectAsStateWithLifecycle()
+                val cpuDetail by viewModel.cpuDetail.collectAsStateWithLifecycle()
                 var screen by rememberSaveable { mutableStateOf(MonitorScreen.Dashboard) }
 
                 val lifecycleOwner = LocalLifecycleOwner.current
@@ -60,6 +62,7 @@ class MainActivity : ComponentActivity() {
                         snapshot = snapshot,
                         onNetworkClick = { screen = MonitorScreen.Network },
                         onMemoryClick = { screen = MonitorScreen.Memory },
+                        onCpuClick = { screen = MonitorScreen.Cpu },
                     )
                     MonitorScreen.Network -> NetworkDetailScreen(
                         snapshot = snapshot?.network,
@@ -69,6 +72,11 @@ class MainActivity : ComponentActivity() {
                     )
                     MonitorScreen.Memory -> MemoryDetailScreen(
                         detail = memoryDetail,
+                        apps = viewModel.apps,
+                        onBack = { screen = MonitorScreen.Dashboard },
+                    )
+                    MonitorScreen.Cpu -> CpuDetailScreen(
+                        detail = cpuDetail,
                         apps = viewModel.apps,
                         onBack = { screen = MonitorScreen.Dashboard },
                     )
